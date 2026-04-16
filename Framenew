@@ -1,0 +1,73 @@
+flowchart LR
+
+A[Engineer Config] --> B[Orchestrator<br/>Config Parsing + Registry Lookup]
+
+B --> C{Validated PINN Available?}
+
+C -->|Yes| D[Solver Agent<br/>PINN Inference (Surrogate)]
+
+C -->|No| E[Model Builder<br/>System Matrices (M, C, K)<br/>+ Parameter Bounds]
+
+E --> F[Solver Agent<br/>ODE Integration (Numerical)]
+
+F --> G[Optimisation Agent<br/>Bayesian Optimisation Loop]
+
+D --> H[Results & Validation Agent<br/>ODE Verification + Output]
+G --> H
+
+H --> I[Optimised Parameters to Engineer]
+
+
+The Full Picture
+
+The Goal
+An engineer inputs a truck configuration — axle layout, suspension type, load condition — and the system automatically returns optimised suspension parameters (axle stiffness values, front axle damping) that minimise cabin RMS acceleration. The system should work for any configuration, not just 6x2 NRS laden, without any code changes.
+
+The Problem Being Solved
+Solving the ride dynamics ODE for every candidate parameter set during Bayesian optimisation is slow. A PINN surrogate, trained once per configuration, can replace the ODE calls during optimisation and make the whole process much faster. But you can’t always have a validated PINN ready — so the system needs to handle both cases gracefully.
+At the same time, there are many truck configurations — 4x2, 6x2, 8x2, NRS, reactive suspension, laden, unladen — and building a separate hardcoded pipeline for each is not scalable. The architecture needs to be config-driven so one system serves all variants.
+
+The Physics Insight That Enables Generality
+The cabin equations of motion are the same across all configurations. Only the sprung mass equations change depending on axle count and suspension type. This means the system only needs to swap out one block of the dynamics model based on config — the rest stays fixed. This is what allows the Model Builder agent to construct any configuration programmatically rather than having separate models hardcoded.
+
+The Five Agents
+Orchestrator sits at the top. It receives the engineer’s config, validates it, looks up the PINN registry to decide whether a validated surrogate exists for this configuration, sequences the other agents, and handles any failure routing — for example if validation fails it can loop back to re-run optimisation with tighter bounds.
+Model Builder takes the config and constructs the full dynamics model — mass matrix, damping matrix, stiffness matrix, and the parameter search space bounds. It assembles the cabin equations (always the same) plus the correct sprung mass equations for the given axle layout and suspension type. Output is a fully described mechanical system ready for simulation.
+Solver Agent takes the model and evaluates cabin RMS for a given set of suspension parameters. It has two internal modes — PINN mode loads the trained surrogate and runs inference fast, ODE mode integrates the full system numerically. Both modes expose exactly the same interface to the outside. The Orchestrator tells it which mode to use based on the registry lookup. The Optimisation Agent never needs to know which mode is running.
+Optimisation Agent treats the Solver as a black box function and runs Bayesian optimisation over the parameter search space. It calls the Solver repeatedly with candidate parameter sets, builds a surrogate of the objective landscape, and converges on the stiffness and damping values that minimise cabin RMS. Because Solver’s interface is consistent, this agent works identically whether PINN or ODE is underneath.
+Results and Validation Agent takes the optimised parameters and does two things. First it runs a verification simulation using ODE mode regardless of what the Optimiser used — this confirms the result is physically real and not a PINN artefact. Then it checks params are within physical bounds, formats the final output with achieved RMS and parameter values, and flags any significant disagreement between PINN and ODE for retraining.
+
+The PINN Registry
+A simple lookup table — config key maps to PINN status and model path. Orchestrator reads this on every run. As more PINNs get trained and validated over time, the system automatically uses them without any code changes. Configs without a validated PINN fall back to ODE silently.
+
+6x2_NRS_laden        → validated   → fast path
+6x2_NRS_unladen      → not validated → ODE fallback  
+4x2_NRS_laden        → not trained → ODE fallback
+
+
+The Data Flow
+
+Engineer Config
+      ↓
+Orchestrator → registry lookup → decides PINN or ODE
+      ↓
+Model Builder → M/C/K + param bounds
+      ↓
+Solver Agent (PINN or ODE mode, same interface)
+      ↓
+Optimisation Agent → Bayesian optimisation loop
+      ↓
+Results & Validation Agent → ODE verification + output
+      ↓
+Optimised Parameters to Engineer
+
+
+What Makes It Industry Relevant
+It is not hardcoded to any one truck variant. Adding a new configuration requires no code change — just ODE data to train a PINN if desired, and a registry entry. The ODE path means it always works even before any PINN is trained. The verification step means engineers get a physically confirmed result, not just a surrogate’s word for it. And the architecture naturally extends to configurable objective functions beyond cabin RMS, parallel scenario comparison runs, and eventually DFMEA and RAG integration — without redesigning the core.
+
+The Honest Build Order
+First get the full pipeline working ODE-only end to end in LangGraph. Then validate your PINN for 6x2 NRS laden and slot it in as the fast path. Then expand configs. That way something works completely on day one and the system improves incrementally.
+
+Ready to start writing code whenever you are.​​​​​​​​​​​​​​​​
+
+
