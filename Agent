@@ -1,18 +1,20 @@
-flowchart TD
+flowchart LR
 
-A[Input Config] --> B[Orchestrator]
+A[Engineer Config] --> B[Orchestrator<br/>Registry Lookup]
 
-B --> C{Solver Mode}
-C -->|PINN| D[Solver]
-C -->|ODE| D
+B --> C{PINN Available?}
 
-D --> E[Model Builder]
-E --> F[Optimiser]
-F --> G[Validation]
+C -->|Yes| G[Results & Validation Agent<br/>ODE Verification + Output]
 
-G --> H[Output]
+C -->|No| D[Model Builder<br/>M, C, K + Parameter Bounds]
 
-G -->|Fail| B
+D --> E[Solver Agent<br/>ODE Mode]
+
+E --> F[Optimisation Agent<br/>Bayesian Optimisation Loop]
+
+F --> G
+
+G --> H[Optimised Parameters to Engineer]
 
 This is a really well-framed problem. Let me break down the tradeoffs and then give you a realistic agentic architecture.
 
