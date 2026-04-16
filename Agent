@@ -1,3 +1,19 @@
+flowchart TD
+
+A[Input Config] --> B[Orchestrator]
+
+B --> C{Solver Mode}
+C -->|PINN| D[Solver]
+C -->|ODE| D
+
+D --> E[Model Builder]
+E --> F[Optimiser]
+F --> G[Validation]
+
+G --> H[Output]
+
+G -->|Fail| B
+
 This is a really well-framed problem. Let me break down the tradeoffs and then give you a realistic agentic architecture.
 
 ## The Core Tension
