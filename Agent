@@ -1,85 +1,529 @@
-flowchart LR
+“””
+physics.py  –  road signal interpolation, asymmetric damper, EOM, static equilibrium.
 
-A[Engineer Config] --> B[Orchestrator<br/>Registry Lookup]
+Drop-in replacement / extension of your existing ODE code.
+All numpy – no torch dependencies.
+“””
 
-B --> C{PINN Available?}
+from **future** import annotations
 
-C -->|Yes| G[Results & Validation Agent<br/>ODE Verification + Output]
+import warnings
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Tuple
 
-C -->|No| D[Model Builder<br/>M, C, K + Parameter Bounds]
+import numpy as np
+import pandas as pd
+from scipy.integrate import solve_ivp
+from scipy.linalg import solve as lin_solve
+from scipy.optimize import least_squares
 
-D --> E[Solver Agent<br/>ODE Mode]
+from config import (
+BASE_CFG, DT, STATE_NAMES,
+ZC, THC, PHC, ZS, THS, PHS,
+)
 
-E --> F[Optimisation Agent<br/>Bayesian Optimisation Loop]
+# ─────────────────────────────────────────────────────────────
 
-F --> G
+# Road signals
 
-G --> H[Optimised Parameters to Engineer]
+# ─────────────────────────────────────────────────────────────
 
-This is a really well-framed problem. Let me break down the tradeoffs and then give you a realistic agentic architecture.
+def load_track(csv_path: str) -> Tuple[np.ndarray, np.ndarray]:
+“”“Read a 2-column CSV (time, displacement).  Drops NaN rows.”””
+df = pd.read_csv(csv_path, header=None)
+t  = pd.to_numeric(df.iloc[:, 0], errors=“coerce”).values
+z  = pd.to_numeric(df.iloc[:, 1], errors=“coerce”).values
+mask = np.isfinite(t) & np.isfinite(z)
+return t[mask].astype(float), z[mask].astype(float)
 
-## The Core Tension
+def make_linear_interp(x: np.ndarray, y: np.ndarray) -> Callable:
+“”“Fast clamp-and-lerp – vectorised, no scipy overhead.”””
+x, y = np.asarray(x, float), np.asarray(y, float)
+def f(xq):
+xq  = np.asarray(xq, float)
+xqc = np.clip(xq, x[0], x[-1])
+idx = np.clip(np.searchsorted(x, xqc) - 1, 0, len(x) - 2)
+w   = (xqc - x[idx]) / np.maximum(x[idx + 1] - x[idx], 1e-12)
+return y[idx] * (1 - w) + y[idx + 1] * w
+return f
 
-You want a system that:
-1. Optimises suspension parameters (KF, CF, K2, K3) for minimum cabin RMS acceleration
-2. Works across **different model parameterisations** (6×2 NRS today, something else tomorrow)
-3. Works across **different ODE structures** (model changes)
-4. Is reusable inside an agentic network — not a one-shot script
+@dataclass
+class RoadSignals:
+f1L: Callable; f1R: Callable
+f2L: Callable; f2R: Callable
+f3L: Callable; f3R: Callable
 
-The key insight is: **the ODE is your ground truth, the PINN is a learned surrogate**. These serve different roles and you need both in a robust system.
+```
+def axle_inputs(self, t: float, cfg: Dict) -> Tuple[float, ...]:
+    zr1L, zr1R = float(self.f1L(t)), float(self.f1R(t))
+    zr2L, zr2R = float(self.f2L(t)), float(self.f2R(t))
+    zr3L, zr3R = float(self.f3L(t)), float(self.f3R(t))
+    z1f  = 0.5 * (zr1L + zr1R)
+    z2   = 0.5 * (zr2L + zr2R)
+    z3   = 0.5 * (zr3L + zr3R)
+    ph_f = (zr1L - zr1R) / cfg["WT1"]
+    ph2  = (zr2L - zr2R) / cfg["WT2"]
+    ph3  = (zr3L - zr3R) / cfg["WT3"]
+    return z1f, ph_f, z2, ph2, z3, ph3
 
----
+def axle_input_rates(self, t: float, cfg: Dict,
+                     dt: float = DT) -> Tuple[float, ...]:
+    p = self.axle_inputs(t + dt, cfg)
+    m = self.axle_inputs(t - dt, cfg)
+    return tuple((a - b) / (2.0 * dt) for a, b in zip(p, m))
+```
 
-## ODE-based vs Hybrid PINN — What Each Actually Buys You
+def build_road_signals(cfg: Dict) -> RoadSignals:
+t1L, z1L = load_track(cfg[“axlefront_left_csv”])
+t1R, z1R = load_track(cfg[“axlefront_right_csv”])
+t2L, z2L = load_track(cfg[“axlerear1_left_csv”])
+t2R, z2R = load_track(cfg[“axlerear1_right_csv”])
+t3L, z3L = load_track(cfg[“axlerear2_left_csv”])
+t3R, z3R = load_track(cfg[“axlerear2_right_csv”])
+return RoadSignals(
+make_linear_interp(t1L, z1L), make_linear_interp(t1R, z1R),
+make_linear_interp(t2L, z2L), make_linear_interp(t2R, z2R),
+make_linear_interp(t3L, z3L), make_linear_interp(t3R, z3R),
+)
 
-**Pure ODE + Bayesian Optimisation**
-- Always correct (no surrogate error)
-- Slow per evaluation — BO helps, but each call still solves the ODE
-- Completely portable: swap the ODE file, re-optimise, done
-- No training data needed
-- Fragile to ODE changes only in the sense that you re-run, not retrain
+def precompute_road_array(cfg: Dict, t_eval: np.ndarray) -> np.ndarray:
+“””
+Pre-evaluate all 6 axle signals on t_eval.
+Returns float32 array of shape [T, 6]:
+columns = [z1f, ph_f, z2, ph2, z3, ph3]
+“””
+road = build_road_signals(cfg)
+out  = np.empty((len(t_eval), 6), dtype=np.float32)
+for i, t in enumerate(t_eval):
+out[i] = road.axle_inputs(t, cfg)
+return out
 
-**Hybrid PINN Surrogate + Optimisation**
-- Fast at inference once trained (~100x speedup)
-- But retraining is needed whenever the ODE changes or the parameter space changes significantly
-- Training data must come from the ODE anyway — so the ODE is still the source of truth
-- Generalises within the training distribution, not outside it
+# ─────────────────────────────────────────────────────────────
 
-**The real answer for your use case:** both, layered. The ODE path is the fallback and the retraining trigger. The PINN is the fast path used by the agent at runtime.
+# Asymmetric two-stage damper  (numpy scalar)
 
----
+# ─────────────────────────────────────────────────────────────
 
-## Realistic Agentic ArchitectureHere's how to think through each layer:
+def asym_damper_force(v_rel: float, cfg: Dict) -> float:
+“””
+Two-stage asymmetric damper.
+Compression branch (v < 0): slope cs_minus, high-speed slope gamma_c * cs_minus
+Rebound    branch (v ≥ 0): slope cp = asym_ratio * cs_minus,
+high-speed slope gamma_r * cp
+“””
+cs  = cfg[“cs_minus”]
+cp  = cfg[“asym_ratio”] * cs
+a_c = -0.05    # compression breakpoint [m/s]
+a_r =  0.13    # rebound    breakpoint [m/s]
+gc  = cfg[“gamma_c”]
+gr  = cfg[“gamma_r”]
+if v_rel < 0:
+return cs * v_rel if v_rel >= a_c else cs * (a_c + gc * (v_rel - a_c))
+else:
+return cp * v_rel if v_rel <= a_r else cp * (a_r + gr * (v_rel - a_r))
 
----
+# ─────────────────────────────────────────────────────────────
 
-## Layer-by-layer breakdown
+# Geometric constraints
 
-**Model registry agent** — this is the key to making it generalisable. Instead of hardcoding the 6×2 NRS model, you pass in a model descriptor: an ODE file (Python/MATLAB/Modelica callable), the parameter names and bounds, and the objective definition. This agent parses the ODE's state dimensionality and validates that the parameter space is well-formed. When your model changes — say you switch to a 4×2 axle layout, or add an extra DOF — you just swap the descriptor. Nothing else changes.
+# ─────────────────────────────────────────────────────────────
 
-**Surrogate manager agent** — this is the brains of the reuse logic. It maintains a cache keyed by a hash of (ODE signature + training parameter ranges). On every call, it checks: is there a valid PINN cached for this exact model? If yes, use the fast path (millisecond inference). If no — because the ODE changed, or the parameter range expanded — it triggers the ODE solver to generate training data and retrains. This is what makes the system reusable across model changes rather than being a one-shot tool.
+def geom_constraints(
+q: np.ndarray,
+t: float,
+cfg: Dict,
+road: RoadSignals,
+) -> Tuple[np.ndarray, np.ndarray]:
+“””
+Returns g [2] and Jacobian G [2, 12].
+Constraints enforce torque-rod kinematics at rear axles 2 and 3.
+“””
+z_s, th_s, ph_s = q[ZS], q[THS], q[PHS]
+_, _, z2, ph2, z3, ph3 = road.axle_inputs(t, cfg)
 
-**Optimisation agent** — runs Bayesian optimisation (BoTorch or similar) over KF, CF, K2, K3. The evaluator it calls is the surrogate if available, or the raw ODE if not. The BO loop doesn't care which — it just sees a black box that returns RMS acceleration given θ. This decoupling is essential.
+```
+l2   = cfg["L12"]
+l3   = cfg["L12"] + cfg["L23"]
+S2   = cfg["S_tf2"];  S3  = cfg["S_tf3"]
+L_DL2 = cfg["L_DL2"]; dDL2 = cfg.get("dell_DL2", 0.02)
+L_DL3 = cfg["L_DL3"]; dDL3 = cfg.get("dell_DL3", 0.02)
+bL2  = cfg["beta_L2"];  bL3  = cfg["beta_L3"]
 
-**ODE verifier agent** — the critical safety net. The PINN can drift if the training distribution was imperfect. After BO finds an optimum, this agent re-runs the true ODE at θ* and checks if the PINN's prediction error is below a threshold (say 5%). If it's above, it flags PINN drift, adds the new point to training data, and kicks off a retraining cycle. Over time this self-heals the surrogate.
+g2 = ((z_s + l2*th_s + S2*ph_s)
+      - (L_DL2 + dDL2)*np.sin(bL2 - th_s)
+      - (z2 + 0.5*cfg["WT2"]*ph2))
+g3 = ((z_s + l3*th_s + S3*ph_s)
+      - (L_DL3 + dDL3)*np.sin(bL3 - th_s)
+      - (z3 + 0.5*cfg["WT3"]*ph3))
 
----
+G = np.zeros((2, 12), dtype=float)
+cL2 = np.cos(bL2 - th_s)
+cL3 = np.cos(bL3 - th_s)
+G[0, ZS]  = 1.0
+G[0, THS] = l2 + (L_DL2 + dDL2) * cL2
+G[0, PHS] = S2
+G[1, ZS]  = 1.0
+G[1, THS] = l3 + (L_DL3 + dDL3) * cL3
+G[1, PHS] = S3
 
-## What makes this generalisable
+return np.array([g2, g3], dtype=float), G
+```
 
-The entire system is parameterised by the model descriptor. To use it on a new vehicle model:
-- Swap the ODE callable
-- Update parameter names and bounds
-- Define the output channel you want to minimise (cabin vertical acceleration, for instance)
+# ─────────────────────────────────────────────────────────────
 
-The surrogate manager detects the model is new (hash mismatch), runs ODE-based data generation, trains a fresh PINN, and caches it. Next time that same model is run, it hits the fast path. The more you use it, the more it pays off — which is exactly what you want in an agentic system that gets called repeatedly.
+# Mass matrix and generalised force vector
 
----
+# ─────────────────────────────────────────────────────────────
 
-## Practical implementation notes
+def build_M_R(
+q: np.ndarray,
+v: np.ndarray,
+t: float,
+cfg: Dict,
+road: RoadSignals,
+) -> Tuple[np.ndarray, np.ndarray]:
+“””
+Returns M [12,12] and R [12] (generalised force residual).
+EOM: M q̈ + G^T λ = -R(q, q̇)
+“””
+# q and v are 12-element vectors; first 6 entries are the active DOFs
+z_c  = q[ZC];  th_c = q[THC]; ph_c = q[PHC]
+z_s  = q[ZS];  th_s = q[THS]; ph_s = q[PHS]
+dz_c = v[ZC];  dth_c= v[THC]; dph_c= v[PHC]
+dz_s = v[ZS];  dth_s= v[THS]; dph_s= v[PHS]
 
-For the ODE integration, `scipy.integrate.solve_ivp` with an adaptive stepper (RK45) works well. The PINN should be conditioned on both the suspension parameters and initial conditions, and should output the full state trajectory — exactly the architecture you already built for the 12-DOF PINN.
+```
+z1f, ph_f, z2, ph2, z3, ph3 = road.axle_inputs(t, cfg)
+dz1f, dph_f, dz2, dph2, dz3, dph3 = road.axle_input_rates(t, cfg)
 
-For the BO loop, BoTorch with a Gaussian process surrogate over the PINN's output is a clean setup. You use the PINN as the cheap evaluator inside BO, then verify periodically with the ODE. The acquisition function (Expected Improvement or Upper Confidence Bound) handles the exploration-exploitation tradeoff.
+# ── unpack cfg ──────────────────────────────────────────
+phi_NRS2 = ((cfg["beta_L2"]*cfg["L_DL2"] - cfg["beta_R2"]*cfg["L_DR2"])
+            / max(cfg["S_tf2"], 1e-6))
+phi_NRS3 = ((cfg["beta_L3"]*cfg["L_DL3"] - cfg["beta_R3"]*cfg["L_DR3"])
+            / max(cfg["S_tf3"], 1e-6))
 
-The cache can be as simple as a directory of model files keyed by hash — no database needed initially. When the system matures, you can promote it to a proper model registry (MLflow or similar).
+m_c   = cfg["m_c"];   I_xxc = cfg["I_xxc"]; I_yyc = cfg["I_yyc"]
+m_s   = cfg["m_s"];   I_sxx = cfg["I_sxx"]
+I_syy = cfg["I_syy"]; I_sxy = cfg["I_sxy"]
+a, b  = cfg["a"], cfg["b"]
+hs, g = cfg["hs"], cfg["g"]
+l_cfcg = cfg["l_cfcg"]; l_crcg = cfg["l_crcg"]
+l_cf   = cfg["l_cf"];   l_cr   = cfg["l_cr"]
+lf     = cfg["lf"];     hcp    = cfg["hcp"]
+l2     = cfg["L12"];    l3     = cfg["L12"] + cfg["L23"]
+bL2, bR2 = cfg["beta_L2"], cfg["beta_R2"]
+bL3, bR3 = cfg["beta_L3"], cfg["beta_R3"]
+L_DL2, L_DR2 = cfg["L_DL2"], cfg["L_DR2"]
+L_DL3, L_DR3 = cfg["L_DL3"], cfg["L_DR3"]
+dDL2 = cfg.get("dell_DL2", 0.02); dDR2 = cfg.get("dell_DR2", 0.02)
+dDL3 = cfg.get("dell_DL3", 0.02); dDR3 = cfg.get("dell_DR3", 0.02)
+Kcfl, Kcfr, Kcrl, Kcrr = cfg["K_cfl"], cfg["K_cfr"], cfg["K_crl"], cfg["K_crr"]
+Ccfl, Ccfr, Ccrl, Ccrr = cfg["C_cfl"], cfg["C_cfr"], cfg["C_crl"], cfg["C_crr"]
+K_f, C_f = cfg["K_f"], cfg["C_f"]
+K_2, C_2 = cfg["K_2"], cfg["C_2"]
+K_3, C_3 = cfg["K_3"], cfg["C_3"]
+k_tf, c_tf = cfg["k_tf"], cfg["c_tf"]
+k_r1, c_r1 = cfg["k_r1"], cfg["c_r1"]
+k_r2, c_r2 = cfg["k_r2"], cfg["c_r2"]
+
+# ── mass matrix ─────────────────────────────────────────
+M = np.zeros((12, 12))
+M[ZC,  ZC]  = m_c
+M[THC, THC] = I_yyc
+M[PHC, PHC] = I_xxc
+M[ZS,  ZS]  = m_s
+M[THS, THS] = I_syy
+M[THS, PHS] = I_sxy; M[PHS, THS] = I_sxy
+M[PHS, PHS] = I_sxx + m_s * (hs**2)
+
+# ── cabin mount forces ───────────────────────────────────
+Csum = Ccfl + Ccfr + Ccrl + Ccrr
+Ksum = Kcfl + Kcfr + Kcrl + Kcrr
+
+R = np.zeros(12)
+
+# Z_C equation
+R[ZC] = (
+    + Csum*(dz_c - dz_s)
+    - (Ccfl*l_cfcg + Ccfr*l_cfcg - Ccrl*l_crcg - Ccrr*l_crcg)*dth_c
+    - (-Ccfl*l_cf - Ccfr*l_cf - Ccrl*l_cr - Ccrr*l_cr)*dth_s
+    - (-Ccfl*b + Ccfr*a - Ccrl*b + Ccrr*a)*dph_c
+    - (Ccfl*b - Ccfr*a + Ccrl*b - Ccrr*a)*dph_s
+    + Ksum*(z_c - z_s)
+    - (Kcfl*l_cfcg + Kcfr*l_cfcg - Kcrl*l_crcg - Kcrr*l_crcg)*th_c
+    - (-Kcfl*l_cf - Kcfr*l_cf - Kcrl*l_cr - Kcrr*l_cr)*th_s
+    - (-Kcfl*b + Kcfr*a - Kcrl*b + Kcrr*a)*ph_c
+    - (Kcfl*b - Kcfr*a + Kcrl*b - Kcrr*a)*ph_s
+)
+
+# TH_C equation
+R[THC] = (
+    - (Ccfl*l_cfcg + Ccfr*l_cfcg - Ccrl*l_crcg - Ccrr*l_crcg)*dz_c
+    - (-Ccfl*l_cfcg - Ccfr*l_cfcg - Ccrl*l_crcg - Ccrr*l_crcg)*dz_s
+    - (-Ccfl*l_cfcg**2 - Ccfr*l_cfcg**2 - Ccrl*l_crcg**2 - Ccrr*l_crcg**2)*dth_c
+    - (Ccfl*l_cfcg*l_cf + Ccfr*l_cfcg*l_cf
+       - Ccrl*l_crcg*l_cr - Ccrr*l_crcg*l_cr)*dth_s
+    - (-Ccfl*l_cfcg*b + Ccfr*l_cfcg*a
+       - Ccrl*l_crcg*b + Ccrr*l_crcg*a)*dph_c
+    - (Ccfl*l_cfcg*b - Ccfr*l_cfcg*a
+       + Ccrl*l_crcg*b - Ccrr*l_crcg*a)*dph_s
+    - (Kcfl*l_cfcg + Kcfr*l_cfcg - Kcrl*l_crcg - Kcrr*l_crcg)*z_c
+    - (-Kcfl*l_cfcg - Kcfr*l_cfcg - Kcrl*l_crcg - Kcrr*l_crcg)*z_s
+    - (-Kcfl*l_cfcg**2 - Kcfr*l_cfcg**2
+       - Kcrl*l_crcg**2 - Kcrr*l_crcg**2 + m_c*g*hcp)*th_c
+    - (Kcfl*l_cfcg*l_cf + Kcfr*l_cfcg*l_cf
+       - Kcrl*l_crcg*l_cr - Kcrr*l_crcg*l_cr)*th_s
+    - (-Kcfl*l_cfcg*b + Kcfr*l_cfcg*a
+       - Kcrl*l_crcg*b + Kcrr*l_crcg*a)*ph_c
+    - (Kcfl*l_cfcg*b - Kcfr*l_cfcg*a
+       + Kcrl*l_crcg*b - Kcrr*l_crcg*a)*ph_s
+)
+
+# PH_C equation
+R[PHC] = (
+    - (-Ccfl*b + Ccfr*a - Ccrl*b + Ccrr*a)*dz_c
+    - (Ccfl*b - Ccfr*a + Ccrl*b - Ccrr*a)*dz_s
+    - (-Kcfl*b + Kcfr*a - Kcrl*b + Kcrr*a)*z_c
+    - (Kcfl*b - Kcfr*a + Kcrl*b - Kcrr*a)*z_s
+    - (-Ccfl*l_cfcg*b - Ccfr*l_cfcg*a
+       + Ccrl*l_crcg*b + Ccrr*l_crcg*a)*dth_c
+    - (Ccfl*l_cfcg*b + Ccfr*l_cfcg*a
+       - Ccrl*l_crcg*b - Ccrr*l_crcg*a)*dth_s
+    - (-Ccfl*b**2 + Ccfr*a**2 - Ccrl*b**2 + Ccrr*a**2)*dph_c
+    - (Ccfl*b**2 - Ccfr*a**2 + Ccrl*b**2 - Ccrr*a**2)*dph_s
+    - (-Kcfl*l_cfcg*b - Kcfr*l_cfcg*a
+       + Kcrl*l_crcg*b + Kcrr*l_crcg*a)*th_c
+    - (Kcfl*l_cfcg*b + Kcfr*l_cfcg*a
+       - Kcrl*l_crcg*b - Kcrr*l_crcg*a)*th_s
+    - (-Kcfl*b**2 + Kcfr*a**2 - Kcrl*b**2 + Kcrr*a**2)*ph_c
+    - (Kcfl*b**2 - Kcfr*a**2 + Kcrl*b**2 - Kcrr*a**2)*ph_s
+)
+
+# Z_S equation  (asymmetric damper applied to front)
+v_rel_f  = dz_s - lf*dth_s - dz1f   # relative velocity front mount
+F_damp_f = asym_damper_force(v_rel_f, cfg)
+
+R[ZS] = (
+    - Csum*dz_c
+    - (-Ccfl*l_cfcg - Ccfr*l_cfcg + Ccrl*l_crcg + Ccrr*l_crcg)*dth_c
+    + Csum*dz_s
+    + (Ccfl*l_cf + Ccfr*l_cf + Ccrl*l_cr + Ccrr*l_cr)*dth_s
+    - Ksum*z_c
+    - (-Kcfl*l_cfcg - Kcfr*l_cfcg + Kcrl*l_crcg + Kcrr*l_crcg)*th_c
+    + Ksum*z_s
+    + (Kcfl*l_cf + Kcfr*l_cf + Kcrl*l_cr + Kcrr*l_cr)*th_s
+    + K_f*(z_s - lf*th_s - z1f) + F_damp_f
+    + K_2*(z_s - z2 - bL2*L_DL2 - bR2*L_DR2 + l2*th_s)
+    + C_2*(dz_s - dz2 + l2*dth_s)
+    + K_3*(z_s - z3 - bL3*L_DL3 - bR3*L_DR3 + l3*th_s)
+    + C_3*(dz_s - dz3 + l3*dth_s)
+)
+
+# TH_S equation
+R[THS] = (
+    - (Ccfl*l_cfcg + Ccfr*l_cfcg - Ccrl*l_crcg - Ccrr*l_crcg)*dz_c
+    - (-Ccfl*l_cfcg**2 - Ccfr*l_cfcg**2
+       - Ccrl*l_crcg**2 - Ccrr*l_crcg**2)*dth_c
+    + (Ccfl*l_cf + Ccfr*l_cf + Ccrl*l_cr + Ccrr*l_cr)*dz_s
+    + (Ccfl*l_cfcg*l_cf + Ccfr*l_cfcg*l_cf
+       - Ccrl*l_crcg*l_cr - Ccrr*l_crcg*l_cr)*dth_s
+    - (Kcfl*l_cf + Kcfr*l_cf + Kcrl*l_cr + Kcrr*l_cr)*z_c
+    + (-Kcfl*l_cfcg*l_cf - Kcfr*l_cfcg*l_cf
+       + Kcrl*l_crcg*l_cr + Kcrr*l_crcg*l_cr)*th_c
+    + (Kcfl*l_cf + Kcfr*l_cf + Kcrl*l_cr + Kcrr*l_cr)*z_s
+    + (Kcfl*l_cf**2 + Kcfr*l_cf**2
+       + Kcrl*l_cr**2 + Kcrr*l_cr**2)*th_s
+    - lf*(K_f*(z_s - lf*th_s - z1f) + F_damp_f)
+    + l2*(K_2*(z_s - z2 - bL2*L_DL2 - bR2*L_DR2 + l2*th_s)
+          + C_2*(dz_s - dz2 + l2*dth_s))
+    + l3*(K_3*(z_s - z3 - bL3*L_DL3 - bR3*L_DR3 + l3*th_s)
+          + C_3*(dz_s - dz3 + l3*dth_s))
+)
+
+# PH_S equation
+R[PHS] = (
+    + m_s*g*hs*ph_s
+    - k_tf*(ph_s - ph_f)  - c_tf*(dph_s - dph_f)
+    - k_r1*(ph_s - ph2 - phi_NRS2) - c_r1*(dph_s - dph2)
+    - k_r2*(ph_s - ph3 - phi_NRS3) - c_r2*(dph_s - dph3)
+)
+R[PHS] *= -1.0
+
+return M, R
+```
+
+# ─────────────────────────────────────────────────────────────
+
+# KKT solve helper
+
+# ─────────────────────────────────────────────────────────────
+
+def kkt_solve(M: np.ndarray, R: np.ndarray,
+G: np.ndarray, gamma: np.ndarray) -> np.ndarray:
+“”“Solve constrained EOM:  [M G^T; G 0][qdd; λ] = [-R; -gamma].”””
+nc = G.shape[0]
+n  = M.shape[0]
+A  = np.zeros((n + nc, n + nc))
+b  = np.zeros(n + nc)
+A[:n, :n] = M;  A[:n, n:] = G.T;  A[n:, :n] = G
+b[:n] = -R;     b[n:] = -gamma
+return lin_solve(A, b)
+
+# ─────────────────────────────────────────────────────────────
+
+# ODE RHS
+
+# ─────────────────────────────────────────────────────────────
+
+def rhs(t: float, x: np.ndarray, cfg: Dict, road: RoadSignals) -> np.ndarray:
+q = x[:12]; v = x[12:]
+M, R  = build_M_R(q, v, t, cfg, road)
+gq, G = geom_constraints(q, t, cfg, road)
+gdot  = G @ v
+w, zeta = cfg[“baum_omega”], cfg[“baum_zeta”]
+gamma   = (w**2) * gq + 2.0 * zeta * w * gdot
+sol     = kkt_solve(M, R, G, gamma)
+xdot    = np.empty_like(x)
+xdot[:12] = v
+xdot[12:] = sol[:12]
+return xdot
+
+# ─────────────────────────────────────────────────────────────
+
+# Static equilibrium
+
+# ─────────────────────────────────────────────────────────────
+
+def static_equilibrium(cfg: Dict, road: RoadSignals,
+verbose: bool = True) -> np.ndarray:
+“””
+Find static equilibrium state vector x0 = [q0; 0].
+Stage 1: least-squares on EOM + constraint residuals.
+Stage 2: dynamic relaxation fallback.
+“””
+q_seed  = np.zeros(12)
+lam_seed = np.zeros(2)
+y0 = np.hstack([q_seed, lam_seed])
+
+```
+def F(y):
+    q   = y[:12]; lam = y[12:]
+    v0  = np.zeros(12)
+    M, R = build_M_R(q, v0, 0.0, cfg, road)
+    gq, G = geom_constraints(q, 0.0, cfg, road)
+    return np.hstack([R + G.T @ lam, 1e5 * gq])
+
+lsq = least_squares(F, y0, method="trf", loss="soft_l1",
+                     xtol=1e-12, ftol=1e-12, gtol=1e-12, max_nfev=800)
+if lsq.success or np.linalg.norm(F(lsq.x)) < 1e-3:
+    q0 = lsq.x[:12]
+    if verbose:
+        gn = np.linalg.norm(geom_constraints(q0, 0.0, cfg, road)[0])
+        print(f"  Static eq. (LSQ)  ||g||={gn:.3e}")
+    return np.hstack([q0, np.zeros(12)])
+
+if verbose:
+    print("  LSQ failed – trying dynamic relaxation …")
+cfg_r = dict(cfg)
+for key in ("C_f", "C_2", "C_3", "C_cfl", "C_cfr", "C_crl", "C_crr"):
+    cfg_r[key] = cfg[key] * 20
+x0_r = np.zeros(24)
+sol  = solve_ivp(lambda t, x: rhs(t, x, cfg_r, road),
+                 (0.0, 5.0), x0_r, method="Radau",
+                 rtol=1e-7, atol=1e-9)
+q0   = sol.y[:12, -1]
+# short polish
+y_pol = np.hstack([q0, np.zeros(2)])
+lsq2  = least_squares(F, y_pol, method="trf", loss="soft_l1",
+                       xtol=1e-12, ftol=1e-12, gtol=1e-12, max_nfev=400)
+q0 = lsq2.x[:12] if lsq2.success else q0
+if verbose:
+    gn = np.linalg.norm(geom_constraints(q0, 0.0, cfg, road)[0])
+    print(f"  Static eq. (relax) ||g||={gn:.3e}")
+return np.hstack([q0, np.zeros(12)])
+```
+
+# ─────────────────────────────────────────────────────────────
+
+# Single ODE case  (called by data_gen.py)
+
+# ─────────────────────────────────────────────────────────────
+
+def run_one_case(
+params: Dict,
+cfg_base: Dict,
+t_eval:  np.ndarray,
+verbose: bool = False,
+) -> Optional[“pd.DataFrame”]:
+“””
+Solve EOM for one parameter set.
+Returns DataFrame with columns: t, params…, states, velocities, accels.
+Returns None on failure.
+“””
+import pandas as pd
+
+```
+cfg  = {**cfg_base, **params}
+road = build_road_signals(cfg)
+
+if verbose:
+    print(f"    Static equilibrium …")
+try:
+    x0 = static_equilibrium(cfg, road, verbose=verbose)
+except Exception as e:
+    print(f"    Static eq. failed: {e}")
+    return None
+
+try:
+    sol = solve_ivp(
+        fun=lambda t, x: rhs(t, x, cfg, road),
+        t_span=(t_eval[0], t_eval[-1]),
+        y0=x0, t_eval=t_eval,
+        method="Radau", rtol=1e-6, atol=1e-8,
+        max_step=0.02,
+    )
+except Exception as e:
+    print(f"    solve_ivp failed: {e}")
+    return None
+
+if not sol.success:
+    print(f"    solve_ivp: {sol.message}")
+    return None
+
+rows = []
+for k in range(len(sol.t)):
+    qk  = sol.y[:12, k]
+    qdk = sol.y[12:, k]
+    tt  = float(sol.t[k])
+    M, R  = build_M_R(qk, qdk, tt, cfg, road)
+    gq, G = geom_constraints(qk, tt, cfg, road)
+    w, zeta = cfg["baum_omega"], cfg["baum_zeta"]
+    gamma  = (w**2)*gq + 2*zeta*w*(G @ qdk)
+    qddk   = kkt_solve(M, R, G, gamma)[:12]
+    row = {"t": tt}
+    row.update(params)
+    for i, n in enumerate(STATE_NAMES):
+        row[n]          = float(qk[i])
+        row[f"qd_{n}"]  = float(qdk[i])
+        row[f"qdd_{n}"] = float(qddk[i])
+    rows.append(row)
+
+return pd.DataFrame(rows)
+```
+
+# ─────────────────────────────────────────────────────────────
+
+# Seat RMS helper
+
+# ─────────────────────────────────────────────────────────────
+
+def compute_seat_rms(df: “pd.DataFrame”, cfg: Dict,
+t_ignore: float = 0.5) -> float:
+“””
+Cabin seat vertical acceleration RMS [m/s²].
+a_seat ≈ qdd_z_c + h_seat * qdd_ph_c  (small angle, seat on vehicle centreline)
+“””
+h    = cfg.get(“h_seat”, 0.6)
+mask = df[“t”].values >= t_ignore
+a    = df[“qdd_z_c”].values[mask] + h * df[“qdd_ph_c”].values[mask]
+return float(np.sqrt(np.mean(a**2))) if mask.any() else float(“nan”)
