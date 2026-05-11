@@ -1,0 +1,336 @@
+Here’s the combined single slide:
+
+The Problem
+A 6x2 heavy commercial vehicle experiences continuous road surface excitations through its tyres — these vibrations propagate up through the suspension system into the cabin and are felt directly by the driver at the seat level.
+The metric that captures this is RMS acceleration at the cabin seat — a standard measure of whole body vibration exposure defined under ISO 2631, directly linked to driver fatigue, discomfort, and long term health risk.
+Current suspension parameters are designed conservatively around load and handling requirements. Ride comfort is secondary. Stiffness and damping values are set based on experience — there is no systematic, data-driven optimisation targeting what the driver actually feels.
+The gap: No intelligent framework exists that models the full suspension dynamics and automatically finds the stiffness and damping combination that minimises cabin seat RMS acceleration.
+This work addresses exactly that.
+
+Three beats — physical problem, why the metric matters, what’s missing. Last two lines are your punch. Keep those bold and let them sit.​​​​​​​​​​​​​​​​
+
+Here’s content for all 38 slides:
+
+SLIDE 1 — Title
+Ride Optimisation
+Minimising cabin seat RMS acceleration through intelligent suspension tuning
+
+SLIDE 2 — The Problem
+A 6x2 heavy commercial vehicle experiences continuous road surface excitations through its tyres — these vibrations propagate up through the suspension system into the cabin and are felt directly by the driver at the seat level.
+The metric that captures this is RMS acceleration at the cabin seat — a standard measure of whole body vibration exposure defined under ISO 2631, directly linked to driver fatigue, discomfort, and long term health risk.
+Current suspension parameters are designed conservatively around load and handling requirements. Ride comfort is secondary. Stiffness and damping values are set based on experience — there is no systematic, data-driven optimisation targeting what the driver actually feels.
+The gap: No intelligent framework exists that models the full suspension dynamics and automatically finds the stiffness and damping combination that minimises cabin seat RMS acceleration.
+This work addresses exactly that.
+
+SLIDE 3 — System Definition: Physical Layout
+The vehicle under study is a NVS 6x2 heavy commercial truck. The 6x2 configuration means six wheels total — two at the front steered axle and four at the rear tandem axle, of which only one rear axle is driven.
+The suspension system connects three key masses:
+	•	Sprung mass — the cabin and chassis assembly sitting above the suspension
+	•	Unsprung mass — the axle and wheel assemblies
+	•	Seat mass — the driver seat modelled as a separate mass connected to the cabin
+Road input enters at the tyre contact patch and travels upward through this chain. The objective is to minimise what reaches the top — the seat.
+(Include a schematic or free body diagram here showing the three masses and their connections)
+
+SLIDE 4 — System Definition: Parameters
+The key tunable parameters in this system are:
+	•	Primary suspension stiffness (Ks) — spring connecting sprung mass to unsprung mass
+	•	Primary suspension damping (Cs) — damper in parallel with the spring
+	•	Seat suspension stiffness (Kse) — spring connecting seat to cabin
+	•	Seat suspension damping (Cse) — damper at seat level
+	•	Tyre stiffness (Kt) — road to unsprung mass connection, treated as fixed
+Fixed parameters include sprung mass, unsprung mass, seat mass, and tyre stiffness. The optimisation variables are the stiffness and damping values — these are what we tune.
+
+SLIDE 5 — System Definition: Assumptions and Boundary Conditions
+To make the problem tractable the following assumptions are made:
+	•	Road profile is modelled as a stochastic input using a Power Spectral Density function representative of a classified road surface
+	•	Vehicle speed is fixed at a representative operating condition
+	•	The system is treated as a vertical quarter car model — lateral and longitudinal dynamics are not considered
+	•	Tyre is modelled as a linear spring with no damping
+	•	Cabin and chassis are treated as a single lumped sprung mass
+	•	The seat is modelled as a single degree of freedom subsystem on top of the sprung mass
+These assumptions reduce the system to a well-defined, solvable ODE while preserving the dominant dynamics that govern ride comfort.
+
+SLIDE 6 — ODE Formulation: Equations of Motion
+From the physical model, applying Newton’s second law to each mass gives three coupled second order ODEs:
+Seat mass:
+Mse · ẍse = -Cse(ẋse - ẋs) - Kse(xse - xs)
+Sprung mass:
+Ms · ẍs = Cse(ẋse - ẋs) + Kse(xse - xs) - Cs(ẋs - ẋu) - Ks(xs - xu)
+Unsprung mass:
+Mu · ẍu = Cs(ẋs - ẋu) + Ks(xs - xu) - Kt(xu - zr)
+Where zr is the road input. These three equations fully describe the vertical dynamics of the system. The objective — RMS of ẍse — is directly extracted from the seat mass equation.
+
+SLIDE 7 — ODE Formulation: State Space Representation
+The three second order ODEs are converted into a system of six first order ODEs by introducing state variables:
+States: x1 = xse, x2 = ẋse, x3 = xs, x4 = ẋs, x5 = xu, x6 = ẋu
+This gives a standard state space form:
+ẋ = Ax + Bu
+Where u is the road input zr. This form is what gets numerically integrated using a standard ODE solver. The state space representation also makes it straightforward to swap parameter values during optimisation — A and B are functions of Ks, Cs, Kse, Cse.
+
+SLIDE 8 — ODE Formulation: Base Model Simulation and Validation
+Before optimisation, the base model is simulated using nominal suspension parameters to establish a reference.
+	•	Road input is generated as a random signal shaped by a PSD consistent with ISO 8608 road class
+	•	The ODE system is integrated over a representative time window
+	•	Seat acceleration time history is computed and RMS is extracted
+This baseline RMS is the benchmark everything else is measured against. Any optimised solution must beat this number. The simulation also validates that the model behaves physically — natural frequencies, damping ratios, and time domain response are checked against expected ranges for this class of vehicle.
+
+SLIDE 9 — Two-Approach Strategy: The Fork
+Two parallel approaches are developed to solve this optimisation problem:
+Physics-Based Approach
+Built entirely from the ODE model. Every function evaluation during optimisation runs the full simulation. Accurate by construction — the physics is always satisfied. The cost is computational time per evaluation.
+Surrogate Modelling — PINN
+A Physics-Informed Neural Network trained to approximate the system response. Once trained, inference is near-instantaneous. The investment is upfront in data generation and training. The payoff is speed at deployment.
+Why both?
+Physics-based gives you ground truth and interpretability. Surrogate gives you speed and scalability. They are not competing — they are complementary. Physics-based validates, surrogate scales.
+
+SLIDE 10 — Two-Approach Strategy: Pipeline Overview
+(This slide is best as a diagram — two parallel flowcharts side by side)
+Physics-Based Pipeline:
+Road Input → ODE Simulation → RMS Extraction → Optimiser → Updated Parameters → Loop
+Surrogate Pipeline:
+Data Generation → PINN Training → Trained Model → Optimiser → Updated Parameters → Validate against Physics
+Both pipelines share the same problem formulation — same design variables, same objective, same constraints. The difference is purely in how the objective function is evaluated.
+
+SLIDE 11 — Nonlinear Damper: Physical Motivation
+Real dampers are not linear. A linear damper assumes force is directly proportional to velocity at all times — this is a simplification that breaks down at high velocities and during compression vs rebound asymmetry.
+A 2-stage nonlinear damper better represents real hardware:
+	•	At low velocities the damper behaves softly — absorbing small road inputs without transmitting harshness
+	•	At high velocities the damper stiffens — providing control during larger events
+This two-stage character is what gives modern suspension dampers their ability to handle both comfort and stability simultaneously. Modelling this accurately means the optimised parameters are physically meaningful and implementable.
+
+SLIDE 12 — Nonlinear Damper: Modelling the Force-Velocity Curve
+The 2-stage nonlinear damper is modelled through a piecewise or smooth nonlinear force-velocity relationship:
+	•	Stage 1 (low velocity): F = C1 · v — linear region with low damping coefficient
+	•	Stage 2 (high velocity): F = C1 · v1 + C2 · (v - v1) — additional stiffening beyond a threshold velocity v1
+The transition between stages can be modelled as a smooth continuous function to avoid discontinuities in the ODE integration.
+(Include force-velocity curve plot here showing the two-stage character clearly)
+This replaces the single linear damping coefficient Cs with a richer model that captures real damper behaviour.
+
+SLIDE 13 — Nonlinear Damper: Option 1 vs Option 2
+Two ways to incorporate the nonlinear damper into the optimisation:
+Option 1 — Direct Nonlinear Optimisation
+The nonlinear damper model is embedded directly into the ODE. The optimiser works on the nonlinear system from the start. The parameters it finds are directly for the nonlinear damper.
+Option 2 — Linear Optimise then Fit Nonlinear
+Optimise on the linear system first. Then fit a nonlinear curve to the optimal linear damping value to find the equivalent 2-stage parameters.
+Both approaches produced similar RMS results. Option 1 is preferred because the optimiser is always working with the true system — there is no approximation step, the parameters are physically consistent, and there is no risk of the post-fit curve introducing error. It is a cleaner and more honest pipeline.
+
+SLIDE 14 — Physics-Based Optimisation: Problem Formulation
+The optimisation is formally stated as:
+Minimise: RMS(ẍse) — seat acceleration
+Design Variables: Ks, Cs, Kse, Cse — primary and seat suspension stiffness and damping
+Subject to:
+	•	Lower and upper bounds on each variable based on physically realisable hardware ranges
+	•	Stability constraint — the system must remain stable under the given road input
+	•	Ride-handling trade-off constraint in the multi-objective case
+This formulation is the same for both single and multi-objective cases. The difference is in what the optimiser does with it.
+
+SLIDE 15 — Physics-Based Optimisation: BayesOpt Single Objective
+Bayesian Optimisation is chosen for the single objective case because:
+	•	Each function evaluation is expensive — it runs a full ODE simulation
+	•	BayesOpt is sample efficient — it builds a surrogate of the objective landscape and decides intelligently where to evaluate next
+	•	It handles noisy, non-convex objective functions well
+The algorithm builds a Gaussian Process model of the RMS landscape over the design space. An acquisition function — typically Expected Improvement — selects the next point to evaluate. Over iterations it converges to the optimum with far fewer evaluations than gradient-based or grid search methods.
+(Show convergence plot — RMS vs number of iterations)
+
+SLIDE 16 — Physics-Based Optimisation: pymoo Multi-Objective
+The multi-objective formulation introduces a second objective alongside RMS acceleration — typically suspension deflection or dynamic tyre load, representing the handling and road holding trade-off.
+pymoo is used with NSGA-II — a well established evolutionary algorithm for multi-objective problems. It evolves a population of solutions over generations, maintaining diversity and driving towards the Pareto front.
+The result is not a single answer but a Pareto front — a set of optimal solutions where improving one objective necessarily worsens the other. This gives the engineer the trade-off curve and the ability to choose based on priority.
+(Show Pareto front plot — RMS acceleration vs suspension deflection)
+
+SLIDE 17 — Physics-Based Optimisation: Single vs Multi Objective Comparison
+
+
+
+|         |Single Objective                 |Multi Objective                      |
+|---------|---------------------------------|-------------------------------------|
+|Output   |One optimal point                |Pareto front                         |
+|Method   |BayesOpt                         |NSGA-II via pymoo                    |
+|Objective|Minimise RMS only                |RMS + handling trade-off             |
+|Use case |When comfort is the only priority|When trade-offs need to be understood|
+
+Both converged to similar RMS values at the comfort-optimal end of the Pareto front — confirming consistency between the two formulations. The multi-objective result is richer and more useful for real engineering decisions where handling cannot be ignored entirely.
+
+SLIDE 18 — Physics-Based Results: Optimal Parameters
+Present the optimal stiffness and damping values found:
+
+
+
+|Parameter |Baseline|Optimised|
+|----------|--------|---------|
+|Ks (N/m)  |—       |—        |
+|Cs (Ns/m) |—       |—        |
+|Kse (N/m) |—       |—        |
+|Cse (Ns/m)|—       |—        |
+
+Discuss what the optimiser found — whether stiffness went softer or stiffer, whether damping increased or decreased, and whether the values are physically realisable. This is where the engineering interpretation of the result happens.
+
+SLIDE 19 — Physics-Based Results: RMS Before and After
+The headline result. Show clearly:
+	•	Baseline RMS acceleration at cabin seat
+	•	Optimised RMS acceleration
+	•	Percentage reduction achieved
+(Bar chart or simple before-after visual works well here)
+Contextualise against ISO 2631 comfort thresholds — where does the baseline sit, where does the optimised value sit, and what does that mean in terms of driver experience and health exposure.
+
+SLIDE 20 — Physics-Based Results: Time Domain Response
+Show the seat acceleration time history for baseline vs optimised over the same road input and time window.
+The visual should clearly show the optimised response has lower amplitude peaks and a smoother signal overall. This makes the result tangible — the audience can see the improvement, not just read a number.
+(Overlay plot — baseline in one colour, optimised in another, same time axis)
+
+SLIDE 21 — Physics-Based Results: Frequency Domain Analysis
+Show the Power Spectral Density of seat acceleration for baseline vs optimised.
+Key things to point out:
+	•	The frequency range most sensitive to human comfort is 4–8 Hz — show what happens in this band
+	•	Whether the optimisation has shifted energy away from this band
+	•	Natural frequencies of the system and how damping has affected the peaks
+This slide gives the frequency domain interpretation of the same improvement shown in time domain on the previous slide. Together they give a complete picture.
+
+SLIDE 22 — PINN: Why Physics-Informed
+A standard neural network trained on data alone would learn input-output mappings but has no guarantee of physical consistency. It can predict values that violate the equations of motion — especially in regions with sparse data.
+A Physics-Informed Neural Network embeds the governing ODEs directly into the loss function. The network is penalised not just for deviating from data but also for violating physics. This gives:
+	•	Better generalisation with less data
+	•	Physically consistent predictions across the design space
+	•	Ability to extrapolate more reliably beyond the training distribution
+For an engineering application where data is expensive and physics is known, PINN is the right choice over a pure data-driven surrogate.
+
+SLIDE 23 — PINN: Network Architecture
+Inputs: Suspension parameters — Ks, Cs, Kse, Cse — and road input characteristics
+Hidden layers: Fully connected layers with appropriate activation functions — tanh is common for PINNs as it is smooth and differentiable
+Outputs: Predicted seat acceleration time series or directly predicted RMS value depending on formulation
+The network needs to be differentiable with respect to inputs so that the physics residual — the ODE — can be computed and included in the loss. Automatic differentiation handles this.
+(Include a clean architecture diagram — input layer, hidden layers, output layer with labels)
+
+SLIDE 24 — PINN: Loss Function
+The total loss has two components:
+Data loss: Mean squared error between predicted and actual seat acceleration from simulation data
+Ldata = (1/N) Σ |ŷ - y|²
+Physics residual loss: The ODE evaluated at collocation points — how much does the network’s prediction violate the equations of motion
+Lphysics = (1/Nc) Σ |ODE residual|²
+Total loss: L = λ1 · Ldata + λ2 · Lphysics
+The weighting factors λ1 and λ2 balance the two terms. Finding the right balance is part of the training process — too much physics weight and the network ignores data, too little and the physics constraint has no effect.
+
+SLIDE 25 — PINN: Training Data
+Training data is generated from the physics-based ODE simulation across a range of parameter combinations:
+	•	A design of experiments approach samples the stiffness and damping space — Latin Hypercube Sampling or similar
+	•	For each parameter combination the ODE is simulated and seat acceleration is recorded
+	•	The dataset covers the full design space to ensure the surrogate can generalise
+The data challenge: Generating sufficient coverage of a 4-dimensional design space requires a meaningful number of simulations. This is the upfront cost of the surrogate approach. However once generated this data is reusable — any surrogate model can be trained on it.
+
+SLIDE 26 — PINN: Training Behaviour
+Show the training loss curves — total loss, data loss, and physics loss plotted against epochs.
+Key things to discuss:
+	•	How quickly the network converges
+	•	Whether the physics loss and data loss reduce together or one dominates
+	•	Any instability during early training and how it was resolved
+	•	Final training and validation loss values
+(Loss vs epoch plot — show both training and validation to confirm no overfitting)
+
+SLIDE 27 — PINN: Hyperparameters and Sensitivity
+Document the key hyperparameter choices and their impact:
+	•	Number of hidden layers and neurons per layer
+	•	Learning rate and scheduler
+	•	Loss weighting λ1 and λ2
+	•	Number of collocation points for physics residual
+	•	Batch size and training epochs
+Brief sensitivity analysis — what happened when these were varied, which parameters mattered most. This shows the network design was deliberate and not arbitrary.
+
+SLIDE 28 — PINN Evaluation: Predicted vs Actual
+On a held-out test set, plot predicted RMS vs actual RMS from the ODE simulation.
+A scatter plot with a 45-degree reference line is clean and effective — points close to the line mean good prediction. Show this across the full range of parameter combinations in the test set, not just a few cherry-picked cases.
+This is the core validation that the surrogate is trustworthy before using it inside an optimisation loop.
+
+SLIDE 29 — PINN Evaluation: Error Metrics
+Report quantitative accuracy:
+	•	MAE — Mean Absolute Error on RMS prediction
+	•	RMSE — Root Mean Square Error
+	•	R² — Coefficient of determination
+	•	Max error — worst case prediction error
+Break these down across different regions of the design space if possible — are there areas where the surrogate is less accurate? This honest reporting builds credibility and tells you where more training data might help.
+
+SLIDE 30 — PINN Inside the Optimisation Loop
+Once the PINN is trained it replaces the ODE simulation as the objective function evaluator inside the optimisation loop.
+The optimiser queries the PINN instead of running the full simulation. Inference takes milliseconds vs the ODE simulation. This means the optimiser can afford to explore far more of the design space in the same wall-clock time.
+Show the optimised parameters found via PINN and compare against the physics-based optimum. How close are they? The gap between them is the surrogate error propagated through the optimisation.
+
+SLIDE 31 — PINN vs Physics: Speed Comparison
+
+
+
+|                   |Physics-Based|PINN Surrogate         |
+|-------------------|-------------|-----------------------|
+|Per evaluation time|seconds      |milliseconds           |
+|Optimisation time  |hours        |minutes                |
+|Accuracy           |ground truth |within X%              |
+|Data requirement   |none         |upfront generation cost|
+
+The speed advantage compounds — not just faster per evaluation but the optimiser can run more iterations, explore more starting points, and do uncertainty analysis that would be prohibitive with the full ODE.
+
+SLIDE 32 — Physics vs Surrogate: Head to Head
+
+
+
+|Dimension            |Physics-Based|PINN Surrogate|
+|---------------------|-------------|--------------|
+|Accuracy             |Exact        |Approximate   |
+|Speed                |Slow         |Fast          |
+|Data needed          |None         |Yes — upfront |
+|Interpretability     |High         |Lower         |
+|Real data integration|Indirect     |Direct        |
+|Scalability          |Limited      |High          |
+
+Neither is strictly better. The right choice depends on the stage of the project and the question being asked.
+
+SLIDE 33 — Physics vs Surrogate: When to Use Which
+Use physics-based when:
+	•	You are in early exploration and have no data
+	•	You need ground truth validation
+	•	The design space is small enough to be tractable
+	•	Interpretability of the result is critical
+Use PINN surrogate when:
+	•	You have sufficient training data or can generate it
+	•	You need to run many optimisation evaluations quickly
+	•	You want to integrate real measurement data to improve realism
+	•	The system will be queried repeatedly at deployment
+In practice: Start with physics-based to understand the system and generate data. Transition to surrogate once training data is available. Use physics-based to validate surrogate predictions periodically.
+
+SLIDE 34 — Generalisation: From Specific to Configurable
+The initial implementation was built for one specific configuration — NVS 6x2, fixed road class, fixed speed. The framework has since been made configurable:
+	•	Vehicle configuration is parameterised — mass values, number of axles, DOF count can be adjusted
+	•	Road class is selectable — ISO 8608 classes A through H
+	•	Vehicle speed is an input parameter
+	•	The optimisation bounds adapt based on configuration
+	•	Both optimisation approaches — BayesOpt and pymoo — are available as selectable modes
+The shift from hardcoded to configurable is what makes this a framework rather than a one-off study.
+
+SLIDE 35 — Generalisation: Configurations It Can Handle
+Show a few example configurations the generalised framework can now run without code changes:
+	•	Different vehicle classes — light commercial, heavy truck, tandem axle variants
+	•	Different road surfaces — smooth highway to rough off-road
+	•	Different speed conditions — city, highway, mixed
+	•	Seat suspension on or off — framework handles both cases
+(A simple table or diagram showing the configuration space works well here)
+
+SLIDE 36 — Generalisation: Fitting Into the Multi-Agent Framework
+This ride optimisation work is the Suspension agent in the larger N-2 layer of the multi-agent architecture.
+	•	The physics-based solver is the Design Calculation agent
+	•	The optimisation logic is the Expert Advisor agent
+	•	The validation against targets is the V&V agent
+	•	Failure mode analysis on the optimal solution feeds the DFMEA agent
+The generalised, configurable framework means this agent can be queried for any supported vehicle configuration — it does not need to be rebuilt. This is exactly the scalable pattern the overall architecture is designed around.
+
+SLIDE 37 — Conclusion: What Was Achieved
+	•	A full vertical dynamics model of a NVS 6x2 suspension system was built and validated
+	•	A 2-stage nonlinear damper was modelled and incorporated into the optimisation
+	•	Single objective optimisation using BayesOpt and multi-objective using pymoo were both implemented and compared
+	•	A Physics-Informed Neural Network surrogate was built, trained, and validated as an alternative objective evaluator
+	•	Both approaches converge to consistent optimal results — validating the surrogate approach
+	•	The framework was generalised and made configurable across vehicle types, road classes, and speeds
+
+SLIDE 38 — Conclusion: Preferred Approach and Where This Goes
+For production use the PINN surrogate approach is preferred once sufficient data is available — the speed advantage at optimisation time is significant and real measurement data can be incorporated directly to improve realism beyond what simulation alone can offer.
+The physics-based approach remains essential for validation, for cases with no data, and for generating the initial training dataset for the surrogate.
+This work demonstrates one complete, working agent in the multi-agent PD framework. The same pattern — model, optimise, validate, generalise — is the blueprint for every other subsystem agent in the architecture.
+The suspension agent is live. The framework is ready to scale.
+
+That’s all 38 slides. The content is intentionally written as speaker-level detail — you can trim each slide down to 3–4 key lines on the actual PowerPoint and use the rest as your speaking notes.​​​​​​​​​​​​​​​​
