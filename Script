@@ -1,20 +1,29 @@
-Here’s the updated script for this slide:
-
-SLIDE 15 — Optimisation
-⏱ ~3 minutes
-Now let’s talk about the optimization strategies we use.
-The cabin seat RMS acceleration is computed from three components — bounce acceleration, roll acceleration, and pitch acceleration — all evaluated at the seat level. These three together give us a complete picture of how much vibration the driver is experiencing.
-We have two optimization approaches available, and the choice between them depends on what the engineer is trying to achieve.
-The first is Single-Objective Optimization using Bayesian Optimization. Bayesian Optimization is a probabilistic, global optimization method — it builds a surrogate model, typically a Gaussian Process, and uses an acquisition function to decide where to sample next. It balances exploration — searching new regions of the parameter space — with exploitation — refining the best solutions found so far. The key advantage here is efficiency: it finds good solutions with far fewer function evaluations than traditional methods, which makes it well suited for our computationally expensive ODE simulations. The output is a single optimal solution — one best parameter set that minimizes the aggregated RMS across all degrees of freedom.
-The second is Multi-Objective Optimization using NSGA-II — the Non-dominated Sorting Genetic Algorithm. This is a population-based search method that runs multiple candidate solutions simultaneously, uses non-dominated sorting to identify Pareto-optimal solutions, and maintains solution diversity through crowding distance. Instead of collapsing everything into one number, it optimizes each degree of freedom independently and returns a Pareto front — a set of trade-off solutions where improving one objective comes at the cost of another.
-The practical implication: with single-objective, you get one answer. With NSGA-II, you get a range of optimal configurations and the engineer chooses based on their design priority — whether that’s prioritizing bounce comfort, minimizing pitch, or balancing all three.
-Both methods are embedded in the framework and can be selected based on the problem at hand.
 Mine 
 
+Slide 1
+Good afternoon, everyone. My name is Madhupranavi along with Revanth & Siddhant, and today we are going to present to you our project is: "Intelligent Scalable Multi-Agent Architecture for Product Development."
+At its core, this is about bringing AI agents into the engineering workflow — not as a standalone tool, not as a chatbot, but as a deeply integrated, hierarchical intelligence framework
+Slide 2
+Product development is highly complex and spans multiple engineering domains such as vehicle systems, integration, suspension, steering, and powertrain. Each subsystem is usually handled independently, creating fragmented workflows and disconnected engineering processes.
+And also it's important to address that, each subsystem has its own full development cycle — from design and calculations to validation and failure analysis. Where few tasks are common across subsystems while few are specific to subsystem 
+In such a case we ultimately envision a connected, automated, and intelligent engineering layer across the entire product development workflow.
+Such that the framework enables subsystem-level intelligence through dedicated engineering agents, automates repetitive tasks with minimal manual intervention, and connects all systems through a centralized orchestration layer to improve collaboration
+
+Slide 3
+
+The architecture is built on a three-level hierarchy: N, N-1, and N-2 — with an agent layer at the bottom.
+At the top — level N — sits the Central Orchestrator. This is the single intelligence layer responsible for coordinating across all engineering domains. It receives tasks, routes them to the right domain, monitors progress, and consolidates outputs.
+At level N-1, we have the Domain Systems — one for each major engineering area: Integration, Vehicle System, CAB, E&E, Drivetrain, Engine. Each domain system manages the subsystems that fall under it.
+At level N-2, we have the Subsystems — Frames, Suspension, Steering, Fuel System, and so on. These are the granular units of engineering work.
+And then, attached to every single subsystem, is the Agent Layer. This is where the actual intelligence lives. And here is the key design principle: every subsystem gets the exact same set of agents.
+An Expert Advisor agent. A Design Calculation agent. A Verification and Validation agent. A DFMEA agent. And more as needed.
+The Central Orchestrator at the top ensures that despite all this modularity, the system behaves as a coordinated whole — not a collection of isolated agents.
+
+Ride optimisation
 Let’s now move from the architecture level to a concrete implementation — ride optimization specifically designed for the suspension system.
 The goal here is to determine the optimal suspension parameters for a 6×2 vehicle equipped with a Non-Reactive Suspension — or NRS — configuration, in order to minimize cabin seat RMS acceleration. 
 
-Why does it matter its mainly because - in a heavy commercial vehicle the driver is exposed to indued vibrations which propagates through suspension to chassis to cabin and seat - which is linked to the driver fatigue discomfort 
+Why does it matter its mainly because - in a heavy commercial vehicle the driver is exposed to induced vibrations which propagates through suspension to chassis to cabin and seat - which is linked to the driver fatigue discomfort 
 
 RMS acceleration at the cabin seat is the standard engineering metric for quantifying this - 
 
@@ -54,213 +63,92 @@ To enforce these constraints, we use Lagrange multipliers through a KKT formulat
 However, numerical integration of constrained differential equations introduces a known problem: constraint drift — where numerical errors accumulate over time and the constraint is gradually violated.
 We address this using Baumgarte Stabilization — a technique that adds a correction term to the equations, effectively acting as a critically damped spring that continuously pulls any constraint violation back toward zero. The stabilization parameters control how quickly this correction is applied.
 This is what makes the ODE simulation numerically robust over long simulation windows.
-Shock absorbing character
 
-are not linear — they have asymmetric, nonlinear characteristics. The damping force in compression is different from the damping force in rebound. This is by design — it gives engineers control over how the suspension handles different road events.
-We explored two design strategies for incorporating this nonlinear behavior into the optimization.
-Option 1 — Direct Optimization: The nonlinear damper model is embedded directly inside the ODE framework. The optimizer simultaneously tunes the linear parameters — K_F, C_F, K_2, K_3 — along with the nonlinear damper parameters: compression damping, asymmetry ratio, and compression and rebound factors. Everything is optimized together.
-Option 2 — Two-Phase Optimization with Curve Fitting: In Phase 1, we optimize only the linear parameters. In Phase 2, we use the velocity time history from Phase 1 to fit the nonlinear damper parameters using a weighted least-squares curve fitting approach. The two phases are sequential.
-Both options were tested. Let's look at what the results showed.
+Shock absorbing character​
+Real-world damping characteristics are not linear — they have asymmetric, nonlinear characteristics. The damping force in compression is different from the damping force in rebound. from the figure we can see that this pattern is governed by damping shape paramters like c-, assym ratio, gammac gammar 
+This is by design which allows control over how the suspension handles different road events.​
+We explored two design strategies for incorporating this nonlinear behavior into the optimization.​
+Option 1 — Direct Optimization: The nonlinear damper model is embedded directly inside the ODE framework. The optimizer simultaneously tune parameters — K_F, C_F, K_2, K_3 — along with the nonlinear damper parameters: compression damping, asymmetry ratio, and compression and rebound factors. Everything is optimized together.​
+Option 2 — Two-Phase Optimization with Curve Fitting: In Phase 1, we optimize only the linear parameters. In Phase 2, we use the velocity time history from Phase 1 to fit the nonlinear damper parameters using a weighted least-squares curve fitting approach. The two phases are sequential.​
+Both options were tested. Let's look at what the results showed.​
+Results:​
+This is the setting considered for simulating both the options where we can observe that The results from both approaches are shown here — comparing the RMS acceleration values and the damper force-velocity curves for each option. and the option 2 of curve fitting the values took the boundary values indicating more stiff while the parameter differences are neglibilible and in terms of the stiffness they are neglible when compared in frequency domain ​
+here on the left is the graph pointong to option 1 while on the right option to linear behaviour to curve fitting Since both approaches produce equivalent results, we recommend Option 1 — Direct Optimization as the preferred pipeline and proceed with it as the design choice ​
+Here is the reasoning: embedding the nonlinear damper directly into the ODE means the optimizer is always working on the true system representation. There is no post-processing step, no approximation introduced by a secondary curve fit. The physical consistency is preserved throughout the entire optimization loop.​
+Option 2 introduces an approximation in Phase 2 — fitting a nonlinear curve after the fact introduces a potential source of error that is absent in Option 1. When performance is equivalent, the cleaner and more rigorous approach is the right choice.​
+Optimisation:​
+lets move into the optimization which is important for this entire problem The optimization framework supports both single-objective and multi-objective formulations.​
+The cabin seat RMS acceleration is computed from three components: bounce acceleration, roll acceleration, and pitch acceleration — all evaluated at the seat level.In single-objective optimization, these three components are aggregated into a single scalar metric, and the optimizer minimizes it directly.​
+In multi-objective optimization, each degree of freedom is treated as a separate objective. This produces a Pareto front — a set of optimal trade-off solutions where improving one objective comes at the cost of another. The engineer can then choose the solution that best fits their design priorities
+The first is Single-Objective Optimization using Bayesian Optimization. Bayesian Optimization is a probabilistic, global optimization method — it builds a surrogate model, typically a Gaussian Process, and uses an acquisition function to decide where to sample next. It balances exploration — searching new regions of the parameter space — with exploitation — refining the best solutions found so far. The key advantage here is efficiency: it finds good solutions with far fewer function evaluations than traditional methods, which makes it well suited for our computationally expensive ODE simulations. The output is a single optimal solution — one best parameter set that minimizes the aggregated RMS across all degrees of freedom.​
+The second is Multi-Objective Optimization using NSGA-II — the Non-dominated Sorting Genetic Algorithm. This is a population-based search method that runs multiple candidate solutions simultaneously, uses non-dominated sorting to identify Pareto-optimal solutions, and maintains solution diversity through crowding distance. Instead of collapsing everything into one number, it optimizes each degree of freedom independently and returns a Pareto front — a set of trade-off solutions where improving one objective comes at the cost of another.​
+The practical implication: with single-objective, you get one answer. With NSGA-II, you get a range of optimal configurations and the engineer chooses based on their design priority — whether that’s prioritizing bounce comfort, minimizing pitch, or balancing all three.​
+Both methods are embedded in the framework and can be selected based on the problem at hand.​
+results - 1 ​
+this is the setting given for both the simulations where we have two pareto front optimal soluation and both the solutions outperform the single objectbe based and here is the observed parameter differebce ​
+results - 2​
+this plot denotes the given input to the system the axle displacement and this is the corresponding time domain plot for single objective function somultion comprising the combined and each dofs acceleration ​
+results 3 ​
+this plots are for pareto front solutoions of multi objective ​
 
-Speaker Script — Intelligent Scalable Multi-Agent Architecture for Product Development
-Estimated Duration: 40–45 Minutes Note: Timings are approximate guides. Adjust pace based on audience engagement.
 
-SLIDE 1 — Title Slide
-⏱ ~2 minutes
-Good [morning/afternoon], everyone. Thank you for being here.
-My name is [Madhupranavi / Revanth / Siddhant], and today we are going to walk you through something we believe is a meaningful step forward in how engineering teams develop and validate products.
-The title of our presentation is: "Intelligent Scalable Multi-Agent Architecture for Product Development."
-At its core, this is about bringing AI agents into the engineering workflow — not as a standalone tool, not as a chatbot, but as a deeply integrated, hierarchical intelligence framework that mirrors the way real engineering organizations are structured.
-We will cover two things today: first, the architecture itself — how it is designed, why it is designed that way, and what makes it different from generic AI applications. And second, a deep technical dive into one real use case — ride comfort optimization for a heavy commercial vehicle — where we have implemented this framework end-to-end.
-Let's get into it.
+Transition​ 
+Multi-objective optimization using NSGA-II outperforms single-objective optimization — it gives access to the full trade-off space and lets the engineer make an informed decision rather than accepting a single aggregated answer. That is a meaningful advantage.​
+But here is the bottleneck we cannot ignore: 10 to 11 hours per optimization run. Every design variation — different road class, different speed, different parameter bounds — requires a full re-run. For a team working through multiple iterations, this is not viable at scale.​
+The physics-based model remains essential for three things: it is the ground truth, it requires no training data, it is fully interpretable, and it is the validation benchmark for any surrogate.​
+But to get the speed needed for rapid iteration, we need a surrogate. And to make the surrogate physically reliable, we need it to be constrained by the governing physics — not just fitted to data.​
+That is exactly what a Physics-Informed Neural Network gives us. A model trained not just on simulation data, but penalized for violating the equations of motion themselves. The network learns physically consistent solutions even in regions where training data is sparse.​
+PINN​
+A standard neural network is trained purely to minimize the gap between its predictions and the training data. A Physics-Informed Neural Network does something more: it embeds the governing ODE directly into the training loss.​
+The total training loss has two components:​
+Data Loss — the mean squared error between predicted and simulated outputs.​
+Physics Loss — the squared ODE residual. If the network's output violates the equation of motion, this term penalizes it, regardless of how well it matches the training data.​
+The total loss is a weighted combination: L = λ₁ · L_data + λ₂ · L_phys​
+This means the network can only learn solutions that are both data-consistent and physically consistent. It cannot overfit noisy data in ways that violate mechanics. This is particularly valuable when training data is limited or noisy — the physics acts as a regularizer.​
 
-SLIDE 2 — The Problem We're Solving
-⏱ ~3 minutes
-Before we talk about the solution, let's be precise about the problem.
-Product development for a complex vehicle program is not one thing. It is dozens of engineering domains running in parallel — Integration, Vehicle Systems, CAB, Electrical and Electronics, Drivetrain, Engine — and within each domain, multiple subsystems, each with their own specialists, standards, tools, and workflows.
-Think about what that means in practice. A suspension engineer working on ride dynamics is running completely separate tools and processes from the E&E team validating control systems — even though both are building the same vehicle. There is no shared intelligence layer. Insights don't flow automatically. Repetitive tasks get repeated manually across teams.
-The scope of what we're addressing is every major engineering domain in a vehicle program, down to the subsystem level — Frames, Suspension, Steering, Fuel Systems, and more. And within each subsystem, the full engineering lifecycle: from expert advisory and design calculations all the way through verification, validation, and failure mode analysis.
-Our vision is a connected, automated, intelligent layer across all product development systems. Automated — so that agents handle repetitive engineering tasks end-to-end. Expert-augmented — so that domain knowledge and engineering rules are embedded in every agent, not just general language capability. And connected — so that all systems communicate through a central orchestrator that maintains context across the program.
-This is the problem. Now let's look at how we've structured the solution.
+​
 
-SLIDE 3 — Architecture Overview
-⏱ ~4 minutes
-The architecture is built on a three-level hierarchy: N, N-1, and N-2 — with an agent layer at the bottom.
-At the top — level N — sits the Central Orchestrator. This is the single intelligence layer responsible for coordinating across all engineering domains. It receives tasks, routes them to the right domain, monitors progress, and consolidates outputs.
-At level N-1, we have the Domain Systems — one for each major engineering area: Integration, Vehicle System, CAB, E&E, Drivetrain, Engine. Each domain system manages the subsystems that fall under it.
-At level N-2, we have the Subsystems — Frames, Suspension, Steering, Fuel System, and so on. These are the granular units of engineering work.
-And then, attached to every single subsystem, is the Agent Layer. This is where the actual intelligence lives. And here is the key design principle: every subsystem gets the exact same set of agents.
-An Expert Advisor agent. A Design Calculation agent. A Verification and Validation agent. A DFMEA agent. And more as needed.
-This means the framework is not built around one specific problem — it is built around a repeatable pattern. Once you have defined the agent layer for Suspension, you have defined it for Steering, for Frames, for Fuel Systems. The blueprint is reusable.
-The Central Orchestrator at the top ensures that despite all this modularity, the system behaves as a coordinated whole — not a collection of isolated agents.
+this diagram points to the overall architecture of the surrogate modelling like said we have the PINN model which predicts based on the input to the sytem which is road inpuit and the tuning parameters where in the next slide we have a detailed archtureure depiction ​
+architecture ​
+The full architecture of the surrogate model is:​
+Road Inputs and Physical Parameters → TCN Encoder and Parameter MLP → Feature Fusion → LSTM → State and Acceleration Heads → Physics-Informed Loss​
+Breaking this down: the road profile time series is processed by a Temporal Convolutional Network encoder, which captures local temporal patterns in the road input. The vehicle's physical parameters — masses, stiffness values — are processed by a separate MLP. These two feature streams are fused together, and then passed into an LSTM that models the system's temporal dynamics.​
+The output heads predict both the system states and the accelerations. And the entire training process is governed by the physics-informed loss we just described.​
 
-SLIDE 4 — Why This Approach
-⏱ ~4 minutes
-We spent considerable time evaluating alternative designs. Let me explain the five principles behind this specific approach.
-First, Modularity. Because every subsystem follows the exact same agent pattern, teams can work in parallel from day one. There is no dependency on another team's architecture decisions. You build for Suspension, and you've simultaneously built the template for everything else.
-Second, Scalability. The N → N-1 → N-2 hierarchy is designed to grow with the program — not resist it. New domains, new subsystems, new agent types can be added at any level without touching existing components. This is not just a nice-to-have — it is essential in an environment where vehicle programs evolve continuously over multi-year cycles.
-Third, Human-in-the-Loop. We want to be explicit about this: this system augments engineers, it does not replace them. Agents surface recommendations, automate calculations, flag risks, and generate structured reports. But every critical design decision is reviewed, validated, and owned by the engineer. The system supports engineering judgment — it does not substitute it.
-Fourth, Domain Awareness. Generic AI is simply not sufficient for precision engineering. Each agent in this system is grounded in domain-specific knowledge — suspension dynamics equations, DFMEA methodology, V&V standards, load cases. The intelligence is engineering-first.
-Fifth, Extensibility. As programs evolve, new agents can be added — cost estimation, supplier selection, regulatory compliance, weight optimization — without any structural change to the underlying architecture.
-These five principles together are what make this approach different from applying a general-purpose AI model to engineering tasks.
+evaluvation:​
+The training evaluation plots shown here demonstrate convergence — the model is learning the suspension dynamics effectively.​
+Moving to test evaluation — the surrogate model, trained on the current simulation dataset, successfully converged to an optimised suspension configuration.​
+The key point here: this same optimization that takes 10 to 11 hours using the physics-based approach runs in minutes using the trained surrogate. Same quality of answer, dramatically different compute time.​
+The framework is deployment-ready. The current training data is entirely simulation-derived. Replacing or augmenting it with real measured road and vehicle response data would further improve prediction accuracy and make the optimized parameters directly reflective of real operating conditions — which is the natural next step in production deployment.​
 
-SLIDE 5 — Ride Optimization (Section Introduction)
-⏱ ~1.5 minutes
-Now, let me hand over the technical deep dive to Madhupranavi, who will walk you through the first real implementation of this framework — ride comfort optimization for a 6×2 heavy commercial vehicle.
-[If you're presenting solo, transition as follows:]
-Let's now move from the architecture level into a concrete implementation. The use case is ride optimization — specifically, finding the optimal suspension stiffness and damping parameters to minimize driver discomfort in a heavy commercial vehicle.
+generalized framework ​
+so far we have been working with one case specific which is for 6x2 NRS whereas we gave generlaised it to adapt to any case which is the generalized framework.​
+What we have built is not a one-off solution for ride optimization. It is a flexible, reusable engineering optimization framework with four key properties.​
+It integrates both the ODE-based and surrogate-based approaches within a single framework, giving the engineer the choice of which modelling strategy to use based on their current needs.​
+It supports seamless switching between use cases — the same framework can be applied to any subsystem optimization problem where a physical model and an objective function can be defined.​
+It supports a range of optimization algorithms — single-objective, multi-objective, gradient-based, evolutionary — making it adaptable to different problem structures.​
+And it facilitates direct result comparison across methods, which supports better decision-making and model validation.​​
+fitting in​
+Now, let's close the loop. How does all of this — the ODE solver, the surrogate model, the optimizer — fit into the multi-agent architecture we described at the beginning?​
+The answer is: the physics code, the solver, and the optimizer are tools that the agent calls. They do not decide whether results make sense, or what to do when something goes wrong. That is the agent's responsibility.​
+At every stage of the workflow, the agent follows a decision framework with four possible paths:​
+Proceed — the stage completed cleanly, move forward. Retry — a recoverable failure occurred, reattempt before deciding whether to continue. Warn — the stage completed but the result is outside expected physical bounds, flag it and continue with a note. Stop — the failure makes continuing meaningless, halt and return a structured explanation to the user and to downstream agents.​
+Every decision is logged — which path was taken, and why. This audit trail is part of the structured output available to downstream agents and to the engineer reviewing results.​
+The five-step workflow embedded in the agent is:​
+Parse and Validate — physics code checked for syntax and model validity​
+Load Road Data — input road profile loaded and verified​
+Pre-flight Test — stability check and compute-time estimate​
+Run Optimiser — multi-objective Pareto or single-objective​
+Generate Outputs — results packaged into a structured summary​
+The physics never changes run to run. What the agent adds is the reasoning layer above it — deciding whether tools are working correctly, whether results are trustworthy, and ensuring nothing downstream receives incomplete or misleading information.​
+demo​
 
-SLIDE 6 — Ride Optimization: Goal and Context
-⏱ ~2.5 minutes
-The goal here is specific and measurable: determine the optimal suspension parameters for a 6×2 vehicle equipped with a Non-Reactive Suspension — or NRS — configuration, in order to minimize cabin seat RMS acceleration.
-Why does this matter? In heavy commercial vehicles, the driver is exposed to continuous road-induced vibrations throughout an entire shift — often 8 to 10 hours at a stretch. These vibrations propagate through the suspension, into the chassis, into the cabin, and ultimately reach the driver's seat.
-RMS acceleration at the cabin seat is the standard engineering metric for quantifying this. It is directly linked to driver fatigue, physical discomfort, and — over time — serious long-term health impacts. This is not an abstract performance metric; it has direct implications for driver wellbeing and, by extension, fleet safety and productivity.
-The suspension system is the primary lever available to the engineer to control this. The question is: given the complexity of the system — multiple axles, coupled dynamics, multiple degrees of freedom — how do you find the optimal configuration efficiently?
-That is what this work addresses.
+we have the working model here where the ode and config are added and there is multi and single ​
 
-SLIDE 7 — System Definition (Part 1)
-⏱ ~2 minutes
-The vehicle under study is a 6×2 configuration — meaning two rear drive axles and one front steer axle. The Non-Reactive Suspension system mechanically couples the rear tandem axles, which allows load sharing across both axles without introducing additional pitch or roll moments.
-This is important because it means the system maintains vehicle attitude stability — the vehicle doesn't pitch forward or roll excessively when one axle encounters a bump — while still distributing the load effectively.
-From a dynamics standpoint, we are modeling the sprung mass — which is the cabin and chassis — with three degrees of freedom: bounce, pitch, and roll. Each axle also has its own bounce and roll dynamics. This gives us a coupled, multi-degree-of-freedom system.
+demo results ​
 
-SLIDE 8 — System Definition (Part 2) / Tunable Parameters
-⏱ ~2 minutes
-The system is formulated using axle displacements, with the primary output we care about being the cabin seat-level RMS acceleration.
-To optimize ride comfort, we tune four key parameters:
-K_F — Front axle spring stiffness
-C_F — Front axle damping coefficient
-K_2 — Rear axle 1 spring stiffness
-K_3 — Rear axle 2 spring stiffness
-These parameters define how the suspension responds to road inputs. Finding the right combination — the one that minimizes seat-level vibration — is the core optimization problem.
+here are it shown
 
-SLIDE 9 — Two Approaches
-⏱ ~3 minutes
-To solve this, we developed and compared two approaches.
-The first is the Physics-Based Approach. The workflow is: define the suspension ODE system, simulate road input by solving the ODEs, extract RMS acceleration from the result, and then optimize stiffness and damping using that result as the objective function.
-The strengths are significant — it is physically reliable, grounded in first-principles mechanics, requires no training data, and produces fully interpretable results. However, the critical limitation is compute time. Each full optimization run takes 10 to 11 hours. Any change to road class, vehicle speed, parameter bounds, or damper model requires a complete re-run. For a team iterating through multiple design variants, this becomes a serious bottleneck.
-The second approach is the Deep Learning Surrogate model. Here, we first generate training data from ODE simulations, train a deep learning model to replicate the system's response, and then use that trained model as a fast proxy inside the optimizer. Once trained, the surrogate predicts RMS acceleration in milliseconds — enabling hundreds of optimization iterations at negligible cost.
-The trade-off: there is an upfront cost in generating the training data and training the model, and the accuracy is bounded by the quality of that training data.
-These two approaches are not competing — they are complementary, as you'll see.
-
-SLIDE 10 — Physics-Based Approach: ODEs
-⏱ ~2 minutes
-The physics-based model is built on a system of Ordinary Differential Equations that describe the dynamics of the suspension system — how the sprung and unsprung masses respond to road inputs over time.
-These equations encode the physical relationships between spring forces, damping forces, mass inertia, and road excitation. Solving them gives us the time-history of accelerations at the cabin seat, from which we compute the RMS value.
-This is the ground truth of the system. Everything we build on top of it — the surrogate model, the optimization framework — is ultimately validated against these equations.
-
-SLIDE 11 — Physics-Based Approach: KKT and Baumgarte Stabilization
-⏱ ~2.5 minutes
-The ODEs represent a 6-degree-of-freedom suspension model with two geometric constraints — constraints that represent the mechanical coupling between axles in the NRS setup.
-To enforce these constraints, we use Lagrange multipliers through a KKT formulation — the Karush-Kuhn-Tucker conditions. These multipliers introduce constraint forces into the equations of motion, ensuring the mathematical solution respects the physical boundaries of the system.
-However, numerical integration of constrained differential equations introduces a known problem: constraint drift — where numerical errors accumulate over time and the constraint is gradually violated.
-We address this using Baumgarte Stabilization — a technique that adds a correction term to the equations, effectively acting as a critically damped spring that continuously pulls any constraint violation back toward zero. The stabilization parameters control how quickly this correction is applied.
-This is what makes the ODE simulation numerically robust over long simulation windows.
-
-SLIDE 12 — Shock Absorber Design: Two Options
-⏱ ~2.5 minutes
-Real-world heavy commercial vehicle dampers are not linear — they have asymmetric, nonlinear characteristics. The damping force in compression is different from the damping force in rebound. This is by design — it gives engineers control over how the suspension handles different road events.
-We explored two design strategies for incorporating this nonlinear behavior into the optimization.
-Option 1 — Direct Optimization: The nonlinear damper model is embedded directly inside the ODE framework. The optimizer simultaneously tunes the linear parameters — K_F, C_F, K_2, K_3 — along with the nonlinear damper parameters: compression damping, asymmetry ratio, and compression and rebound factors. Everything is optimized together.
-Option 2 — Two-Phase Optimization with Curve Fitting: In Phase 1, we optimize only the linear parameters. In Phase 2, we use the velocity time history from Phase 1 to fit the nonlinear damper parameters using a weighted least-squares curve fitting approach. The two phases are sequential.
-Both options were tested. Let's look at what the results showed.
-
-SLIDE 13 — Shock Absorber: Results
-⏱ ~1.5 minutes
-The results from both approaches are shown here — comparing the RMS acceleration values and the damper force-velocity curves for each option.
-You can see that both approaches produce comparable performance in terms of RMS acceleration at the cabin seat. The difference is not in the output — it is in the process.
-
-SLIDE 14 — Shock Absorber: Observation and Conclusion
-⏱ ~2 minutes
-Since both approaches produce equivalent results, we recommend Option 1 — Direct Optimization as the preferred pipeline.
-Here is the reasoning: embedding the nonlinear damper directly into the ODE means the optimizer is always working on the true system representation. There is no post-processing step, no approximation introduced by a secondary curve fit. The physical consistency is preserved throughout the entire optimization loop.
-Option 2 introduces an approximation in Phase 2 — fitting a nonlinear curve after the fact introduces a potential source of error that is absent in Option 1. When performance is equivalent, the cleaner and more rigorous approach is the right choice.
-
-SLIDE 15 — Optimization: Single vs Multi-Objective
-⏱ ~2 minutes
-The optimization framework supports both single-objective and multi-objective formulations.
-The cabin seat RMS acceleration is computed from three components: bounce acceleration, roll acceleration, and pitch acceleration — all evaluated at the seat level.
-In single-objective optimization, these three components are aggregated into a single scalar metric, and the optimizer minimizes it directly.
-In multi-objective optimization, each degree of freedom is treated as a separate objective. This produces a Pareto front — a set of optimal trade-off solutions where improving one objective comes at the cost of another. The engineer can then choose the solution that best fits their design priorities.
-Both formulations are available within the framework, and the choice can be embedded into the workflow based on the specific design requirements.
-
-SLIDE 16-18 — Optimization Results and Plots
-⏱ ~3 minutes
-These slides show the optimization results — the Pareto fronts from multi-objective optimization, the convergence history, and the time-domain comparison between baseline and optimized suspension responses.
-[Walk through plots briefly — point out trends, improvement in RMS values, shape of Pareto front if visible]
-The key takeaway from the results is visible here: the optimized parameter set produces a measurable reduction in cabin seat RMS acceleration across the operating conditions tested. The Pareto front also gives the engineering team flexibility — rather than a single fixed answer, they have a range of Pareto-optimal configurations to choose from based on what trade-offs they are willing to accept.
-
-SLIDE 19 — Inference and Transition to Surrogate Modelling
-⏱ ~3 minutes
-Let's pause here and consolidate the key observation before transitioning.
-Multi-objective optimization using NSGA-II outperforms single-objective optimization — it gives access to the full trade-off space and lets the engineer make an informed decision rather than accepting a single aggregated answer. That is a meaningful advantage.
-But here is the bottleneck we cannot ignore: 10 to 11 hours per optimization run. Every design variation — different road class, different speed, different parameter bounds — requires a full re-run. For a team working through multiple iterations, this is not viable at scale.
-The physics-based model remains essential for three things: it is the ground truth, it requires no training data, it is fully interpretable, and it is the validation benchmark for any surrogate.
-But to get the speed needed for rapid iteration, we need a surrogate. And to make the surrogate physically reliable, we need it to be constrained by the governing physics — not just fitted to data.
-That is exactly what a Physics-Informed Neural Network gives us. A model trained not just on simulation data, but penalized for violating the equations of motion themselves. The network learns physically consistent solutions even in regions where training data is sparse.
-
-SLIDE 20 — PINN: Architecture and Loss Function
-⏱ ~3 minutes
-A standard neural network is trained purely to minimize the gap between its predictions and the training data. A Physics-Informed Neural Network does something more: it embeds the governing ODE directly into the training loss.
-The total training loss has two components:
-Data Loss — the mean squared error between predicted and simulated outputs.
-Physics Loss — the squared ODE residual. If the network's output violates the equation of motion, this term penalizes it, regardless of how well it matches the training data.
-The total loss is a weighted combination: L = λ₁ · L_data + λ₂ · L_phys
-This means the network can only learn solutions that are both data-consistent and physically consistent. It cannot overfit to noisy data in ways that violate mechanics. This is particularly valuable when training data is limited or noisy — the physics acts as a regularizer.
-
-SLIDE 21 — Surrogate Model Architecture and Training
-⏱ ~2.5 minutes
-The full architecture of the surrogate model is:
-Road Inputs and Physical Parameters → TCN Encoder and Parameter MLP → Feature Fusion → LSTM → State and Acceleration Heads → Physics-Informed Loss
-Breaking this down: the road profile time series is processed by a Temporal Convolutional Network encoder, which captures local temporal patterns in the road input. The vehicle's physical parameters — masses, stiffness values — are processed by a separate MLP. These two feature streams are fused together, and then passed into an LSTM that models the system's temporal dynamics.
-The output heads predict both the system states and the accelerations. And the entire training process is governed by the physics-informed loss we just described.
-The training evaluation plots shown here demonstrate convergence — the model is learning the suspension dynamics effectively.
-
-SLIDE 22 — Surrogate Model: Test Evaluation
-⏱ ~2 minutes
-Moving to test evaluation — the surrogate model, trained on the current simulation dataset, successfully converged to an optimised suspension configuration.
-The key point here: this same optimization that takes 10 to 11 hours using the physics-based approach runs in minutes using the trained surrogate. Same quality of answer, dramatically different compute time.
-The framework is deployment-ready. The current training data is entirely simulation-derived. Replacing or augmenting it with real measured road and vehicle response data would further improve prediction accuracy and make the optimized parameters directly reflective of real operating conditions — which is the natural next step in production deployment.
-
-SLIDE 23 — Generalised Framework
-⏱ ~2 minutes
-This brings us to the generalized framework.
-What we have built is not a one-off solution for ride optimization. It is a flexible, reusable engineering optimization framework with four key properties.
-It integrates both the ODE-based and surrogate-based approaches within a single framework, giving the engineer the choice of which modelling strategy to use based on their current needs.
-It supports seamless switching between use cases — the same framework can be applied to any subsystem optimization problem where a physical model and an objective function can be defined.
-It supports a range of optimization algorithms — single-objective, multi-objective, gradient-based, evolutionary — making it adaptable to different problem structures.
-And it facilitates direct result comparison across methods, which supports better decision-making and model validation.
-
-SLIDE 24 — Fitting into the Agentic Architecture
-⏱ ~3 minutes
-Now, let's close the loop. How does all of this — the ODE solver, the surrogate model, the optimizer — fit into the multi-agent architecture we described at the beginning?
-The answer is: the physics code, the solver, and the optimizer are tools that the agent calls. They do not decide whether results make sense, or what to do when something goes wrong. That is the agent's responsibility.
-At every stage of the workflow, the agent follows a decision framework with four possible paths:
-Proceed — the stage completed cleanly, move forward. Retry — a recoverable failure occurred, reattempt before deciding whether to continue. Warn — the stage completed but the result is outside expected physical bounds, flag it and continue with a note. Stop — the failure makes continuing meaningless, halt and return a structured explanation to the user and to downstream agents.
-Every decision is logged — which path was taken, and why. This audit trail is part of the structured output available to downstream agents and to the engineer reviewing results.
-The five-step workflow embedded in the agent is:
-Parse and Validate — physics code checked for syntax and model validity
-Load Road Data — input road profile loaded and verified
-Pre-flight Test — stability check and compute-time estimate
-Run Optimiser — multi-objective Pareto or single-objective
-Generate Outputs — results packaged into a structured summary
-The physics never changes run to run. What the agent adds is the reasoning layer above it — deciding whether tools are working correctly, whether results are trustworthy, and ensuring nothing downstream receives incomplete or misleading information.
-
-SLIDE 25 — Demo
-⏱ ~3-4 minutes (adjust for live demo time)
-Let's look at a live demonstration.
-[Walk through demo — describe inputs being provided to the agent, the agent's decision steps, the outputs it produces, and how the structured summary is presented. If demo is recorded, narrate what's happening on screen.]
-What you're seeing here is the agent framework operating end-to-end — taking a suspension optimization task, executing the workflow autonomously, and delivering a structured result that the engineer can act on directly.
-The key thing to notice is not just that it produces a result, but how it produces it — with full traceability, clear decision points, and a structured output format that integrates cleanly with the broader multi-agent architecture.
-
-SLIDE 26 — Thank You / Q&A
-⏱ ~1.5 minutes
-That brings us to the end of the presentation.
-To summarize what we've covered today:
-We introduced a hierarchical multi-agent architecture designed to bring structured AI intelligence into complex, multi-domain engineering programs. We showed why the design choices — modularity, scalability, human-in-the-loop, domain awareness — matter for real-world deployment.
-We then walked through a full technical implementation: ride comfort optimization for a 6×2 commercial vehicle, including physics-based modeling with Baumgarte-stabilized constrained ODEs, nonlinear damper design, multi-objective optimization, and a physics-informed neural network surrogate that brings optimization time from 10 hours down to minutes.
-And we showed how all of this is wrapped inside an intelligent agent with full decision traceability.
-We believe this framework is a genuine foundation for the next generation of AI-augmented product development.
 Thank you. We're happy to take questions.
 
 APPENDIX: ANTICIPATED QUESTIONS & SUGGESTED ANSWERS
@@ -268,3 +156,5 @@ Q: How do you validate the surrogate model against real vehicle data? A: The cur
 Q: How does the central orchestrator handle conflicts between domain agents? A: The orchestrator maintains a priority hierarchy and a conflict resolution protocol. Domain agents surface conflicting outputs as warnings; the orchestrator logs the conflict and either flags it for human review or resolves it using predefined precedence rules depending on severity.
 Q: Can this framework be applied to non-vehicle engineering domains? A: Yes. The N → N-1 → N-2 hierarchy and the agent pattern are domain-agnostic. The domain-specific knowledge is encoded in the individual agents, not in the architecture itself. The framework has been designed with that generalization in mind.
 Q: What happens when the agent encounters a physics violation in the surrogate output? A: The physics-informed loss during training reduces the likelihood of this, but at inference time, the agent compares the surrogate output against expected physical bounds defined in the validation layer. An out-of-bounds result triggers the "Warn" or "Stop" path depending on the magnitude of the violation.
+
+End of Script
