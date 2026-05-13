@@ -1,3 +1,14 @@
+Here’s the updated script for this slide:
+
+SLIDE 15 — Optimisation
+⏱ ~3 minutes
+Now let’s talk about the optimization strategies we use.
+The cabin seat RMS acceleration is computed from three components — bounce acceleration, roll acceleration, and pitch acceleration — all evaluated at the seat level. These three together give us a complete picture of how much vibration the driver is experiencing.
+We have two optimization approaches available, and the choice between them depends on what the engineer is trying to achieve.
+The first is Single-Objective Optimization using Bayesian Optimization. Bayesian Optimization is a probabilistic, global optimization method — it builds a surrogate model, typically a Gaussian Process, and uses an acquisition function to decide where to sample next. It balances exploration — searching new regions of the parameter space — with exploitation — refining the best solutions found so far. The key advantage here is efficiency: it finds good solutions with far fewer function evaluations than traditional methods, which makes it well suited for our computationally expensive ODE simulations. The output is a single optimal solution — one best parameter set that minimizes the aggregated RMS across all degrees of freedom.
+The second is Multi-Objective Optimization using NSGA-II — the Non-dominated Sorting Genetic Algorithm. This is a population-based search method that runs multiple candidate solutions simultaneously, uses non-dominated sorting to identify Pareto-optimal solutions, and maintains solution diversity through crowding distance. Instead of collapsing everything into one number, it optimizes each degree of freedom independently and returns a Pareto front — a set of trade-off solutions where improving one objective comes at the cost of another.
+The practical implication: with single-objective, you get one answer. With NSGA-II, you get a range of optimal configurations and the engineer chooses based on their design priority — whether that’s prioritizing bounce comfort, minimizing pitch, or balancing all three.
+Both methods are embedded in the framework and can be selected based on the problem at hand.
 Mine 
 
 Let’s now move from the architecture level to a concrete implementation — ride optimization specifically designed for the suspension system.
