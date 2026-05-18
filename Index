@@ -23,4 +23,6 @@ To solve the suspension optimization problem, two complementary modeling approac
 The second is a Deep Learning Surrogate Approach, where a neural network is trained on data generated from the ODE simulations. Once trained, this surrogate model can predict the cabin seat RMS acceleration for any given parameter set in milliseconds — enabling the optimizer to explore the design space at a fraction of the computational cost. The trade-off is an upfront investment in data generation and model training, and the accuracy of the surrogate is bounded by the quality and coverage of the training data.
 These two approaches are not alternatives — they are designed to work together. The physics-based model provides the ground truth and generates the training data; the surrogate model uses that foundation to enable rapid, scalable design iteration. Together, they form the backbone of the optimization framework described in the sections that follow.
 
+https://onedrive.live.com/:w:/g/personal/4954b436216d4413/IQD4gQQL0ILpQbcAJ4SGqubVAQLUV7Mwehs2TGD2LdoQn3w?rtime=I00qSZ203kg&redeem=aHR0cHM6Ly8xZHJ2Lm1zL3cvYy80OTU0YjQzNjIxNmQ0NDEzL0lRRDRnUVFMMElMcFFiY0FKNFNHcXViVkFRTFVWN013ZWhzMlRHRDJMZG9RbjN3P2U9dzdaaExq
+
 Just drop this as a paragraph block right before the Physics-Based section in your report.​​​​​​​​​​​​​​​​
