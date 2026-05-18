@@ -16,3 +16,11 @@
 </html>
 
 https://1drv.ms/w/c/C4473628796E3B0C/IQDZq9w5u25cTo5F6upV4vDrAXfUt6frwoQ1sBEX-GekUyo
+
+Here’s the brief explanation text for the Two Approaches slide — ready to paste in:
+
+To solve the suspension optimization problem, two complementary modeling approaches were developed. The first is a Physics-Based Approach, where the suspension dynamics are modeled directly using a system of Ordinary Differential Equations derived from first principles. The ODE system is solved numerically for a given road input, the cabin seat RMS acceleration is extracted from the solution, and an optimizer then searches for the stiffness and damping parameters that minimize it. This approach is physically rigorous and fully interpretable — the results are exact by construction and require no training data. However, the critical limitation is computational cost: each complete optimization run takes approximately 10 to 11 hours, and any change to the road profile, speed, parameter bounds, or damper model requires a full re-run from scratch.
+The second is a Deep Learning Surrogate Approach, where a neural network is trained on data generated from the ODE simulations. Once trained, this surrogate model can predict the cabin seat RMS acceleration for any given parameter set in milliseconds — enabling the optimizer to explore the design space at a fraction of the computational cost. The trade-off is an upfront investment in data generation and model training, and the accuracy of the surrogate is bounded by the quality and coverage of the training data.
+These two approaches are not alternatives — they are designed to work together. The physics-based model provides the ground truth and generates the training data; the surrogate model uses that foundation to enable rapid, scalable design iteration. Together, they form the backbone of the optimization framework described in the sections that follow.
+
+Just drop this as a paragraph block right before the Physics-Based section in your report.​​​​​​​​​​​​​​​​
